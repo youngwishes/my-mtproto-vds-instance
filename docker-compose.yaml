@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  telemt:
+    image: whn0thacked/telemt-docker:latest
+    container_name: telemt
+    restart: unless-stopped
+    environment:
+      RUST_LOG: "info"
+    volumes:
+      - ./telemt.toml:/etc/telemt.toml:ro
+    ports:
+      - "443:443/tcp"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+    depends_on:
+      - api
+
+  api:
+    build: .
+    container_name: telemt-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./telemt.toml:/app/telemt.toml
+      - ./src:/app/src/
+    env_file:
+      - .env
+    restart: unless-stopped
