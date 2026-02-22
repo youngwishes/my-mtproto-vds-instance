@@ -1,4 +1,4 @@
-show_link = [ "application", "abc", "abc", "abc",]
+show_link = [ "application", "abc", "abc", "abc", "abc",]
 [[upstreams]]
 type = "direct"
 enabled = true
@@ -27,7 +27,7 @@ tls = true
 
 [access.users]
 application = "f7500d69d0479eb1c90454490aa7096d"
-abc = "f57b4744b742f49a33f847dffde500e9"
+abc = "961bfa9e64284bd2a6b4fedf047cbb89"
 
 [access.user_max_tcp_conns]
 application = 0
