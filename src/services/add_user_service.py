@@ -11,13 +11,14 @@ from src import config
 class AddUserService:
     username: str
 
-    async def __call__(self) -> str:
+    async def __call__(self) -> dict:
         async with aiofiles.open(
             config.TELEMT_TOML_PATH, "r", encoding="utf-8"
         ) as file:
             content = await file.read()
             toml_file = toml.loads(content)
-        return await self._add_user(toml_file)
+        key = await self._add_user(toml_file)
+        return {"key": key, "tls_domain": config.TLS_DOMAIN}
 
     async def _add_user(self, toml_file: dict) -> str:
         key = str(os.urandom(16).hex())

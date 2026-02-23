@@ -7,5 +7,5 @@ router = APIRouter(prefix="/api/v1", tags=["users"])
 
 
 @router.post("/add-new-user")
-async def add_new_user(username: str = Body(..., embed=True)) -> str:
+async def add_new_user(username: str = Body(..., embed=True)) -> dict:
     return await AddUserService(username=username)()
