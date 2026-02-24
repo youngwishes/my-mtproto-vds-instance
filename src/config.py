@@ -1,7 +1,7 @@
 import os
 import pathlib
 
-BASE_DIR = pathlib.Path(__name__).absolute().parent.parent
+BASE_DIR = pathlib.Path(__name__).absolute().parent
 
 TLS_DOMAIN = os.getenv("TLS_DOMAIN", "petrovich.ru")
 

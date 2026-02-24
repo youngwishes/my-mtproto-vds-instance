@@ -32,7 +32,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./telemt.toml:/app/telemt.toml
+      - ./telemt.local.toml:/app/telemt.local.toml
       - ./src:/app/src/
     env_file:
       - .env
