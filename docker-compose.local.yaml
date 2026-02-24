@@ -6,7 +6,7 @@ services:
     environment:
       RUST_LOG: "info"
     volumes:
-      - ./telemt.local.toml:/etc/telemt.local.toml:ro
+      - ./telemt.local.toml:/etc/telemt.toml:ro
     ports:
       - "443:443/tcp"
     security_opt:
