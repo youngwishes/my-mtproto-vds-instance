@@ -41,7 +41,8 @@ async def prepare_toml_file() -> dict | None:
             "tls_domain": config.TLS_DOMAIN,
             "mask": True,
             "mask_port": 443,
-            "fake_cert_len": 2048
+            "fake_cert_len": 2048,
+            "tls_emulation": True
         },
 
         "access": {
