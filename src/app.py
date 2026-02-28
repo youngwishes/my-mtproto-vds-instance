@@ -23,7 +23,7 @@ async def prepare_toml_file() -> dict | None:
         "general": {
             "prefer_ipv6": False,
             "fast_mode": True,
-            "use_middle_proxy": False,
+            "use_middle_proxy": True,
             "modes": {
                 "classic": False,
                 "secure": False,
