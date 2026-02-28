@@ -25,7 +25,7 @@ class AddUserService:
         key = str(os.urandom(16).hex())
         toml_file["access"]["users"][self.username] = key
         toml_file["access"]["user_max_tcp_conns"][self.username] = 50
-        toml_file["access"]["user_max_unique_ips"][self.username] = 2
+        toml_file["access"]["user_max_unique_ips"][self.username] = 3
         print(toml_file)
         with open(config.TELEMT_TOML_PATH, "w", encoding="utf-8") as f:
             toml.dump(toml_file, f)
