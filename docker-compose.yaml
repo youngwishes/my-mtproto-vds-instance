@@ -7,8 +7,6 @@ services:
       RUST_LOG: "info"
     volumes:
       - ./telemt.toml:/etc/telemt.toml:ro
-    ports:
-      - "443:443/tcp"  # Оставляем как есть - это публичный доступ
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -26,14 +24,13 @@ services:
     depends_on:
       - api
     networks:
-      - telemt-network  # Добавляем сеть
+      - telemt-network
 
   api:
     build: .
     container_name: telemt-api
-    # ВАЖНО: Меняем проброс порта - только на WireGuard IP
     ports:
-      - "10.10.0.2:8000:8000"  # Теперь только через WireGuard
+      - "10.10.0.5:8000:8000"
     volumes:
       - ./telemt.toml:/app/telemt.toml
       - ./src:/app/src/
@@ -43,10 +40,9 @@ services:
     networks:
       - telemt-network
 
-# Создаем внутреннюю сеть для коммуникации между контейнерами
 networks:
   telemt-network:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16  # Внутренняя сеть для контейнеров
+        - subnet: 172.20.0.0/16
