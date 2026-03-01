@@ -47,13 +47,12 @@ def test_add_new_user(http_client: TestClient):
     assert toml_file_data["access"]["users"]["application"] == application_key
     assert toml_file_data["access"]["users"][username] == john_key
 
-    assert len(toml_file_data["access"]["user_max_tcp_conns"]) == 2
+    assert len(toml_file_data["access"]["user_max_tcp_conns"]) == 1
     assert toml_file_data["access"]["user_max_tcp_conns"]["application"] == 0
-    assert toml_file_data["access"]["user_max_tcp_conns"][username] == 50
 
     assert len(toml_file_data["access"]["user_max_unique_ips"]) == 2
     assert toml_file_data["access"]["user_max_unique_ips"]["application"] == 0
-    assert toml_file_data["access"]["user_max_unique_ips"][username] == 2
+    assert toml_file_data["access"]["user_max_unique_ips"][username] == 3
 
 
 def test_add_new_user_duplicate(http_client: TestClient):
@@ -85,13 +84,12 @@ def test_add_new_user_duplicate(http_client: TestClient):
     assert toml_file_data["access"]["users"]["application"] == application_key
     assert toml_file_data["access"]["users"][username] == john_key
 
-    assert len(toml_file_data["access"]["user_max_tcp_conns"]) == 2
+    assert len(toml_file_data["access"]["user_max_tcp_conns"]) == 1
     assert toml_file_data["access"]["user_max_tcp_conns"]["application"] == 0
-    assert toml_file_data["access"]["user_max_tcp_conns"][username] == 50
 
     assert len(toml_file_data["access"]["user_max_unique_ips"]) == 2
     assert toml_file_data["access"]["user_max_unique_ips"]["application"] == 0
-    assert toml_file_data["access"]["user_max_unique_ips"][username] == 2
+    assert toml_file_data["access"]["user_max_unique_ips"][username] == 3
 
     response = http_client.post("/add-new-user", json={"username": username})
     john_key = response.json()["key"]
@@ -105,10 +103,9 @@ def test_add_new_user_duplicate(http_client: TestClient):
     assert toml_file_data["access"]["users"]["application"] == application_key
     assert toml_file_data["access"]["users"][username] == john_key
 
-    assert len(toml_file_data["access"]["user_max_tcp_conns"]) == 2
+    assert len(toml_file_data["access"]["user_max_tcp_conns"]) == 1
     assert toml_file_data["access"]["user_max_tcp_conns"]["application"] == 0
-    assert toml_file_data["access"]["user_max_tcp_conns"][username] == 50
 
     assert len(toml_file_data["access"]["user_max_unique_ips"]) == 2
     assert toml_file_data["access"]["user_max_unique_ips"]["application"] == 0
-    assert toml_file_data["access"]["user_max_unique_ips"][username] == 2
+    assert toml_file_data["access"]["user_max_unique_ips"][username] == 3

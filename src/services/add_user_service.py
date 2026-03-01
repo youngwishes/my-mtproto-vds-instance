@@ -19,7 +19,9 @@ class AddUserService:
             content = await file.read()
             toml_file = toml.loads(content)
         key = await self._add_user(toml_file)
-        return AddNewUserResponse(tls_domain=config.TLS_DOMAIN, key=key)
+        return AddNewUserResponse(
+            tls_domain=config.TLS_DOMAIN, key=key, node_number=config.NODE_NUMBER
+        )
 
     async def _add_user(self, toml_file: dict) -> str:
         key = str(os.urandom(16).hex())
