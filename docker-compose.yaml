@@ -9,6 +9,8 @@ services:
       - ./telemt.toml:/etc/telemt.toml:ro
     security_opt:
       - no-new-privileges:true
+    ports:
+      - "10.10.0.2:443:443"
     cap_drop:
       - ALL
     cap_add:
