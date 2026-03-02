@@ -11,6 +11,7 @@ services:
       - no-new-privileges:true
     ports:
       - "10.10.0.2:443:443"
+      - "10.10.0.2:9090:9090"
     cap_drop:
       - ALL
     cap_add:
