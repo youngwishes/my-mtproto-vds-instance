@@ -9,8 +9,11 @@ router = APIRouter(prefix="/api/v1", tags=["users"])
 
 
 @router.post("/add-new-user", response_model=AddNewUserResponse)
-async def add_new_user(username: str = Body(..., embed=True)) -> AddNewUserResponse:
-    return await AddUserService(username=username)()
+async def add_new_user(
+    username: str = Body(..., embed=True),
+    secret: str = Body(..., embed=True)
+) -> AddNewUserResponse:
+    return await AddUserService(username=username, secret=secret)()
 
 
 @router.post("/remove-user", status_code=status.HTTP_204_NO_CONTENT)

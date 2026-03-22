@@ -14,10 +14,10 @@ def test_remove_user_service(http_client: TestClient):
     toml_file_data = get_toml_file_data()
     key1 = toml_file_data["access"]["users"]["application"]
     username = "John"
-    response = http_client.post("/add-new-user", json={"username": username})
+    response = http_client.post("/add-new-user", json={"username": username, "secret": "test"})
     assert response.status_code == status.HTTP_200_OK
 
-    assert response.json().get("key")
+    assert response.json().get("key") == "test"
     assert response.json().get("tls_domain") == config.TLS_DOMAIN
 
     response = http_client.post("/remove-user", json={"usernames": [username]})
@@ -62,9 +62,9 @@ def test_remove_user_service_many(http_client: TestClient):
     toml_file_data = get_toml_file_data()
     assert toml_file_data["access"]["users"]["application"]
     username = "John"
-    response = http_client.post("/add-new-user", json={"username": username})
+    response = http_client.post("/add-new-user", json={"username": username, "secret": "test"})
     assert response.status_code == status.HTTP_200_OK
-    assert response.json().get("key")
+    assert response.json().get("key") == "test"
     assert response.json().get("tls_domain") == config.TLS_DOMAIN
 
     response = http_client.post(
