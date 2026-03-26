@@ -3,6 +3,7 @@ services:
     image: whn0thacked/telemt-docker:3.3.30
     container_name: telemt
     restart: unless-stopped
+    user: "root"
     environment:
       RUST_LOG: "info"
     command: ["/etc/telemt/telemt.toml"]
