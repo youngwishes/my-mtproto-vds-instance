@@ -37,6 +37,8 @@ class AddUserServiceV2:
                             "max_unique_ips": 3,
                         },
                     )
+                else:
+                    raise exc
 
         return AddNewUserResponse(
             tls_domain=config.TLS_DOMAIN,
