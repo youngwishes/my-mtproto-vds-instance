@@ -40,7 +40,7 @@ services:
     ports:
       - "${INTERNAL_IP}:8000:8000"
     volumes:
-      - ./telemt.toml:/app/telemt.toml
+     - ./telemt/telemt.toml:/app/telemt/telemt.toml
       - ./src:/app/src/
     env_file:
       - .env
