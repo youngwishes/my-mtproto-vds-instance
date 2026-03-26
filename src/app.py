@@ -1,4 +1,4 @@
-from src.api.routes import router
+from src.api.routes import router_v1, router_v2
 from contextlib import asynccontextmanager
 
 import aiofiles
@@ -35,7 +35,12 @@ async def prepare_toml_file() -> dict | None:
         "server": {
             "port": 443,
             "listen_addr_ipv4": "0.0.0.0",
-            "listen_addr_ipv6": "::"
+            "listen_addr_ipv6": "::",
+            "api": {
+                "enabled": True,
+                "listen": "0.0.0.0",
+                "whitelist": [],
+            }
         },
 
         "censorship": {
@@ -48,8 +53,7 @@ async def prepare_toml_file() -> dict | None:
 
         "access": {
             "users": {"application": "f7500d69d0479eb1c90454490aa7096d"},
-            "user_max_tcp_conns": {"application": 0},
-            "user_max_unique_ips": {"application": 0},
+            "user_max_unique_ips": {"application": 1},
         },
 
         "upstreams": [
@@ -84,4 +88,5 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="MTProto Management API", lifespan=lifespan)
 
-app.include_router(router)
+app.include_router(router_v1)
+app.include_router(router_v2)

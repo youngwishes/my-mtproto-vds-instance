@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(kw_only=True, slots=True, frozen=True)
-class RemoveUserService:
+class RemoveUserServiceV1:
     usernames: list[str]
 
     async def __call__(self) -> None:

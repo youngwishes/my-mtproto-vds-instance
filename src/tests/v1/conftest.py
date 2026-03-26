@@ -28,7 +28,7 @@ def prepare_toml_file() -> dict | None:
         "server": {
             "port": 443,
             "listen_addr_ipv4": "0.0.0.0",
-            "listen_addr_ipv6": "::"
+            "listen_addr_ipv6": "::",
         },
 
         "censorship": {

@@ -9,7 +9,7 @@ from src.api.schemas import AddNewUserResponse
 
 
 @dataclass(kw_only=True, slots=True, frozen=True)
-class AddUserService:
+class AddUserServiceV1:
     username: str
     secret: str
 

@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 from starlette import status
 
 from src import config
-from src.tests.utils import get_toml_file_data
+from src.tests.v1.utils import get_toml_file_data
 
 
 def test_bad_body(http_client: TestClient):
