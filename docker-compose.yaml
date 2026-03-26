@@ -7,11 +7,11 @@ services:
       RUST_LOG: "info"
     command: ["/etc/telemt/telemt.toml"]
     volumes:
-      - ./telemt:/etc/telemt/
+      - ./telemt:/etc/telemt/:rw
     security_opt:
       - no-new-privileges:true
     ports:
-      - "${INTERNAL_IP}:443:443"
+      - "${INTERNAL_IP}:443:443/tcp"
       - "${INTERNAL_IP}:9090:9090"
       - "${INTERNAL_IP}:9091:9091"
     cap_drop:
