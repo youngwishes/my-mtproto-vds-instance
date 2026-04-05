@@ -34,6 +34,11 @@ services:
       nofile:
         soft: 65536
         hard: 65536
+    logging:
+      driver: "local"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   api:
     build: .
@@ -48,6 +53,11 @@ services:
     restart: unless-stopped
     networks:
       - telemt-network
+    logging:
+      driver: "local"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   telemt-network:
