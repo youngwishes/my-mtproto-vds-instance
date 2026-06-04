@@ -1,9 +1,17 @@
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 
 import toml
 from src import config
 from src.app import app
+
+
+@pytest.fixture(autouse=True)
+def _set_telemt_api_root(monkeypatch):
+    monkeypatch.setattr(config, "TELEMT_API_ROOT", "http://172.17.0.1:9091/v1")
+    monkeypatch.setattr(config, "NODE_NUMBER", "1")
 
 
 @pytest.fixture(scope="function")
@@ -61,4 +69,4 @@ def prepare_toml_file() -> dict | None:
 
 @pytest.fixture
 def http_client(prepare_toml_file) -> TestClient:
-    return TestClient(app=app, base_url="http://127.0.0.1:8000/api/v1")
+    return TestClient(app=app, base_url="http://127.0.0.1:8000/api")

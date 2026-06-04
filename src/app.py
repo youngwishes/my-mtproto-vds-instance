@@ -1,4 +1,4 @@
-from src.api.routes import router_v1, router_v2
+from src.api import router
 from contextlib import asynccontextmanager
 
 import aiofiles
@@ -88,5 +88,4 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="MTProto Management API", lifespan=lifespan)
 
-app.include_router(router_v1)
-app.include_router(router_v2)
+app.include_router(router)

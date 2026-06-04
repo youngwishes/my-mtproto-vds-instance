@@ -209,3 +209,4 @@ __marimo__/
 # Telemt configs
 telemt/telemt.toml
 telemt.test.toml
+.claude/

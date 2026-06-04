@@ -150,10 +150,14 @@ dependencies = [
     { name = "aiofiles" },
     { name = "fastapi" },
     { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-httpx" },
     { name = "toml" },
     { name = "uvicorn" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-httpx" },
 ]
 
 [package.metadata]
@@ -161,10 +165,14 @@ requires-dist = [
     { name = "aiofiles", specifier = ">=25.1.0" },
     { name = "fastapi", specifier = ">=0.131.0" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "pytest-httpx", specifier = ">=0.36.0" },
     { name = "toml", specifier = ">=0.10.2" },
     { name = "uvicorn", specifier = ">=0.41.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-httpx", specifier = ">=0.36.0" },
 ]
 
 [[package]]

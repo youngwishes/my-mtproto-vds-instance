@@ -3,15 +3,17 @@ services:
     image: ghcr.io/telemt/telemt:latest
     container_name: telemt
     restart: unless-stopped
+    user: "root"
+    working_dir: /run/telemt
     environment:
       RUST_LOG: "info"
+    command: /usr/local/bin/telemt /etc/telemt/telemt.toml
     volumes:
-      - ./telemt/telemt.toml:/app/config.toml:rw
+      - ./telemt:/etc/telemt:rw
     security_opt:
       - no-new-privileges:true
     ports:
       - "443:443/tcp"
-      - "9090:9090"
       - "9091:9091"
     cap_drop:
       - ALL

@@ -35,19 +35,8 @@ TELEMT_SUCESS_RESPONSE = {
 }
 
 
-TELEMT_CONFLICT_RESPONSE = {
-    "ok": False,
-    "error": {
-        "code": "user_exists",
-        "message": "User already exists"
-    },
-    "request_id": 4
-}
-
-
-
 def test_bad_body(http_client: TestClient):
-    response = http_client.post("/users/add")
+    response = http_client.post("/users")
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
@@ -59,34 +48,7 @@ def test_add_new_user_schema(http_client: TestClient, httpx_mock):
 
     username = "John"
     response = http_client.post(
-        "/users/add", json={"username": username, "secret": "test"}
-    )
-    assert response.json().get("key") == "test"
-    assert response.json().get("tls_domain") == config.TLS_DOMAIN
-
-
-def test_add_new_user_if_exists(http_client: TestClient, httpx_mock):
-    httpx_mock.add_response(
-        status_code=409,
-        json=TELEMT_CONFLICT_RESPONSE,
-        method="POST",
-        url="http://172.17.0.1:9091/v1/users"
-    )
-    httpx_mock.add_response(
-        status_code=204,
-        method="DELETE",
-        url="http://172.17.0.1:9091/v1/users/john"
-    )
-    httpx_mock.add_response(
-        status_code=200,
-        json=TELEMT_SUCESS_RESPONSE,
-        method="POST",
-        url="http://172.17.0.1:9091/v1/users"
-    )
-
-    username = "John"
-    response = http_client.post(
-        "/users/add", json={"username": username, "secret": "test"}
+        "/users", json={"username": username, "secret": "test"}
     )
     assert response.json().get("key") == "test"
     assert response.json().get("tls_domain") == config.TLS_DOMAIN
