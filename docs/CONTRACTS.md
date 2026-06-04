@@ -25,8 +25,7 @@
 ```json
 {
   "key": "35b617d6f7b17d8f2d6bb53aa8510031",
-  "tls_domain": "example.com",
-  "node_number": "1"
+  "tls_domain": "example.com"
 }
 ```
 
@@ -34,7 +33,6 @@
 |---------------|--------|----------------------------------------------|
 | `key`         | string | Секрет, используемый для формирования ссылки |
 | `tls_domain`  | string | Домен TLS-маскировки прокси                  |
-| `node_number` | string | Номер ноды (VDS-инстанса)                    |
 
 ---
 
@@ -61,8 +59,7 @@
 ```json
 {
   "key": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
-  "tls_domain": "example.com",
-  "node_number": "1"
+  "tls_domain": "example.com"
 }
 ```
 

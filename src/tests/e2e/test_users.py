@@ -25,7 +25,6 @@ class TestAddUser:
         body = response.json()
         assert body["key"] == user["secret"]
         assert body["tls_domain"]
-        assert body["node_number"]
 
         api.request("DELETE", "/users", json={"usernames": [user["username"]]})
 

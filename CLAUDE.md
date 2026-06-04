@@ -82,8 +82,13 @@ src/
 |---|---|---|
 | `TELEMT_TOML_FILENAME` | Filename of the telemt config | — |
 | `TELEMT_API_ROOT` | Base URL for telemt HTTP API | — |
-| `NODE_NUMBER` | Node identifier returned in responses | — |
 | `TLS_DOMAIN` | TLS domain returned in responses | `"petrovich.ru"` |
+
+## Rules
+
+1. **Документация** — после любых изменений в коде обновляй соответствующие файлы в `docs/`, `CLAUDE.md` и `README.md`, если изменения затрагивают описанное в них.
+2. **Тесты** — всегда прогоняй и unit, и e2e тесты (`uv run pytest`). Если e2e тесты скипаются — попроси пользователя поднять контейнеры (`docker-compose up --build`) и дождись подтверждения перед тем как считать задачу завершённой.
+3. **Git** — никогда не делай `git commit` и `git push`. Коммиты и пуши выполняет только пользователь.
 
 ## Testing Notes
 

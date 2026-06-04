@@ -54,4 +54,3 @@ def test_rotate_secret(http_client: TestClient, httpx_mock):
     assert response.status_code == status.HTTP_200_OK
     assert response.json().get("key") == "new_secret"
     assert response.json().get("tls_domain") == config.TLS_DOMAIN
-    assert response.json().get("node_number") == config.NODE_NUMBER

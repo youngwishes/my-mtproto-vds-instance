@@ -33,5 +33,4 @@ class RotateSecretService:
         return AddNewUserResponse(
             tls_domain=config.TLS_DOMAIN,
             key=self.secret,
-            node_number=config.NODE_NUMBER,
         )

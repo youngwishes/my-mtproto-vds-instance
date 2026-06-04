@@ -11,7 +11,6 @@ from src.app import app
 @pytest.fixture(autouse=True)
 def _set_telemt_api_root(monkeypatch):
     monkeypatch.setattr(config, "TELEMT_API_ROOT", "http://172.17.0.1:9091/v1")
-    monkeypatch.setattr(config, "NODE_NUMBER", "1")
 
 
 @pytest.fixture(scope="function")
