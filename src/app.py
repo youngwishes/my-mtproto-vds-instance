@@ -21,15 +21,20 @@ async def prepare_toml_file() -> dict | None:
         "show_link": ["application"],
 
         "general": {
-            "prefer_ipv6": False,
             "fast_mode": True,
-            "use_middle_proxy": False,
-            "proxy_protocol": True,
+            "use_middle_proxy": True,
+            "proxy_protocol": False,
             "modes": {
                 "classic": False,
                 "secure": False,
                 "tls": True
             }
+        },
+
+        "network": {
+            "ipv4": True,
+            "ipv6": False,
+            "prefer": 4,
         },
 
         "server": {
