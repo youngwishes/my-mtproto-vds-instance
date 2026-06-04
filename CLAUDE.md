@@ -4,58 +4,76 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FastAPI service for managing MTProto proxy (telemt) users. Exposes two API versions — v1 manipulates a local TOML config file directly, v2 delegates to the telemt HTTP management API.
+FastAPI-сервис для управления пользователями MTProto-прокси (telemt). Является конечным звеном в цепочке: Telegram Bot → Django Backend → **этот сервис** → telemt API.
+
+Подробная документация — в `docs/` (BUSINESS.md, ARCHITECTURE.md, CONTRACTS.md, TELEMT.md).
 
 ## Common Commands
 
 ```bash
 # Install dependencies
-pip install -r requirements.txt
+uv sync
 
 # Run locally
-uvicorn src.app:app --host 0.0.0.0 --port 8000
+uv run uvicorn src.app:app --host 0.0.0.0 --port 8000
 
 # Run all tests
-pytest
+uv run pytest
 
-# Run tests for a specific version
-pytest src/tests/v1/
-pytest src/tests/v2/
+# Run unit tests
+uv run pytest src/tests/unit/
 
-# Run a single test file
-pytest src/tests/v2/test_add_user_view.py
+# Run e2e tests (requires running containers)
+uv run pytest src/tests/e2e/
 
-# Lint (ruff is used, cache present)
+# Lint
 ruff check src/
 
 # Build and run with Docker
-docker-compose up
-docker-compose -f docker-compose.local.yaml up  # local dev variant
+docker-compose up --build
 ```
 
 ## Architecture
 
-### Two API versions with different backends
+### API
 
-**V1** (`src/api/routes/v1/`, `src/services/v1/`) — Reads/writes the telemt TOML config file on disk via `aiofiles`. Changes take effect after the proxy service reloads the file.
+RESTful API с единственным ресурсом `/api/users`:
+- **POST** — создание пользователя
+- **PATCH** — ротация секрета (перевыпуск ссылки)
+- **DELETE** — массовое удаление пользователей
 
-**V2** (`src/api/routes/v2/`, `src/services/v2/`) — Makes async HTTP calls to the telemt management API (base URL set via `TELEMT_API_ROOT` env var). Handles 409 conflicts (user already exists) by deleting and recreating the user.
+Роуты: `src/api/routes/users.py`. Схема ответа: `src/api/schemas/add_new_user_schema.py`.
 
-### Service layer pattern
+### Service layer
 
-All services are **frozen dataclasses** (`@dataclass(frozen=True, kw_only=True, slots=True)`) with a `__call__` method. They are instantiated inline in route handlers, not via FastAPI dependency injection.
+Сервисы — frozen dataclasses с `__call__`. Делают async HTTP-запросы к telemt API через `httpx.AsyncClient`. Инстанцируются inline в хендлерах.
+
+- `AddUserService` — регистрация пользователя (лимит 3 IP)
+- `RotateSecretService` — перевыпуск секрета при компрометации ссылки
+- `RemoveUserService` — массовая очистка протухших ключей (celery-задача, ежедневно)
 
 ### Startup / lifespan (`src/app.py`)
 
-On startup the app reads `telemt.toml` (path from `TELEMT_TOML_PATH` env var) and seeds missing top-level keys with defaults before any request is served.
+При старте читает `telemt.toml` и заполняет дефолтную конфигурацию, если файл пуст.
 
-### Response schema
+## Project Structure
 
-Both versions return `AddNewUserResponse` (defined in `src/api/schemas/add_new_user_schema.py`):
-```python
-key: str        # the generated secret/password
-tls_domain: str # from TLS_DOMAIN env var
-node_number: str # from NODE_NUMBER env var
+```
+src/
+├── app.py
+├── config.py
+├── api/
+│   ├── routes/
+│   │   └── users.py
+│   └── schemas/
+│       └── add_new_user_schema.py
+├── services/
+│   ├── add_user_service.py
+│   ├── rotate_secret_service.py
+│   └── remove_user_service.py
+└── tests/
+    ├── unit/          # мокированный telemt API (pytest-httpx)
+    └── e2e/           # реальные запросы к контейнерам, skip если не подняты
 ```
 
 ## Environment Variables
@@ -63,12 +81,12 @@ node_number: str # from NODE_NUMBER env var
 | Variable | Purpose | Default |
 |---|---|---|
 | `TELEMT_TOML_FILENAME` | Filename of the telemt config | — |
-| `TELEMT_API_ROOT` | Base URL for telemt HTTP API (v2) | — |
+| `TELEMT_API_ROOT` | Base URL for telemt HTTP API | — |
 | `NODE_NUMBER` | Node identifier returned in responses | — |
 | `TLS_DOMAIN` | TLS domain returned in responses | `"petrovich.ru"` |
 
 ## Testing Notes
 
-- V1 tests use a real temporary TOML file prepared in `conftest.py` fixtures.
-- V2 tests mock outbound HTTP with `pytest-httpx` (`httpx.AsyncClient` is patched).
-- The test client is created with `AsyncClient(transport=ASGITransport(app=app), base_url="http://test")`.
+- Unit-тесты мокируют исходящий HTTP через `pytest-httpx`.
+- E2e-тесты отправляют реальные запросы на `http://127.0.0.1:8000`, скипаются если контейнеры не подняты.
+- Пакетный менеджер — `uv`, lockfile — `uv.lock`.
