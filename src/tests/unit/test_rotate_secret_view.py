@@ -43,8 +43,8 @@ def test_rotate_secret(http_client: TestClient, httpx_mock):
     httpx_mock.add_response(
         status_code=200,
         json=TELEMT_ROTATE_SECRET_RESPONSE,
-        method="POST",
-        url="http://172.17.0.1:9091/v1/users/john/rotate-secret",
+        method="PATCH",
+        url="http://172.17.0.1:9091/v1/users/john",
     )
 
     response = http_client.patch(

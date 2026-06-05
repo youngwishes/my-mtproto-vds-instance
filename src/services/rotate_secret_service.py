@@ -24,8 +24,8 @@ class RotateSecretService:
 
     async def __call__(self) -> AddNewUserResponse:
         async with httpx.AsyncClient(base_url=config.TELEMT_API_ROOT) as client:
-            response = await client.post(
-                url=f"/users/{self.username.lower()}/rotate-secret",
+            response = await client.patch(
+                url=f"/users/{self.username.lower()}",
                 json={"secret": self.secret},
             )
             response.raise_for_status()
