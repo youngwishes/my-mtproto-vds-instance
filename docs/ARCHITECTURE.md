@@ -36,7 +36,7 @@ telemt (MTProto-прокси)
 
 ```
 src/
-├── app.py                 # FastAPI-приложение, lifespan, подключение роутера
+├── app.py                 # FastAPI-приложение, подключение роутера
 ├── config.py              # Переменные окружения
 ├── api/
 │   ├── routes/

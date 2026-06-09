@@ -7,7 +7,10 @@ services:
     working_dir: /run/telemt
     environment:
       RUST_LOG: "info"
-    command: /usr/local/bin/telemt /etc/telemt/telemt.toml
+    command: >
+      sh -c '{ [ -f /etc/telemt/telemt.toml ] ||
+      cp /etc/telemt/telemt.example.toml /etc/telemt/telemt.toml; } &&
+      exec /usr/local/bin/telemt /etc/telemt/telemt.toml'
     volumes:
       - ./telemt:/etc/telemt:rw
     security_opt:
@@ -46,7 +49,6 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./telemt/telemt.toml:/app/telemt/telemt.toml
       - ./src:/app/src/
     env_file:
       - .env

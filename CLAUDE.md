@@ -6,8 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 FastAPI-сервис для управления пользователями MTProto-прокси (telemt). Является конечным звеном в цепочке: Telegram Bot → Django Backend → **этот сервис** → telemt API.
 
-Подробная документация — в `docs/` (BUSINESS.md, ARCHITECTURE.md, CONTRACTS.md, TELEMT.md).
-
 ## Common Commands
 
 ```bash
@@ -35,6 +33,8 @@ docker-compose up --build
 
 ## Architecture
 
+Подробная документация — в `docs/` (BUSINESS.md, ARCHITECTURE.md, CONTRACTS.md, TELEMT.md). Точка входа — `src/app.py`.
+
 ### API
 
 RESTful API с единственным ресурсом `/api/users`:
@@ -51,10 +51,6 @@ RESTful API с единственным ресурсом `/api/users`:
 - `AddUserService` — регистрация пользователя (лимит 3 IP)
 - `RotateSecretService` — перевыпуск секрета при компрометации ссылки
 - `RemoveUserService` — массовая очистка протухших ключей (celery-задача, ежедневно)
-
-### Startup / lifespan (`src/app.py`)
-
-При старте читает `telemt.toml` и заполняет дефолтную конфигурацию, если файл пуст.
 
 ## Project Structure
 
@@ -80,7 +76,6 @@ src/
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `TELEMT_TOML_FILENAME` | Filename of the telemt config | — |
 | `TELEMT_API_ROOT` | Base URL for telemt HTTP API | — |
 | `TLS_DOMAIN` | TLS domain returned in responses | `"petrovich.ru"` |
 
