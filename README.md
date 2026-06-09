@@ -9,7 +9,7 @@ FastAPI-сервис для управления пользователями MT
 uv sync
 
 # Запуск
-uv run uvicorn src.app:app --host 0.0.0.0 --port 8000
+uv run uvicorn src.app:app --host 0.0.0.0 --port 8080
 
 # Docker
 docker-compose up --build

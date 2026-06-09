@@ -13,7 +13,7 @@ FastAPI-сервис для управления пользователями MT
 uv sync
 
 # Run locally
-uv run uvicorn src.app:app --host 0.0.0.0 --port 8000
+uv run uvicorn src.app:app --host 0.0.0.0 --port 8080
 
 # Run all tests
 uv run pytest
@@ -88,5 +88,5 @@ src/
 ## Testing Notes
 
 - Unit-тесты мокируют исходящий HTTP через `pytest-httpx`.
-- E2e-тесты отправляют реальные запросы на `http://127.0.0.1:8000`, скипаются если контейнеры не подняты.
+- E2e-тесты отправляют реальные запросы на `http://127.0.0.1:8080`, скипаются если контейнеры не подняты.
 - Пакетный менеджер — `uv`, lockfile — `uv.lock`.

@@ -15,7 +15,7 @@
 Telemt — конечный исполнитель. Этот FastAPI-сервис выступает прослойкой между Django-бэкендом и telemt API. Оба работают на одном VDS в Docker-контейнерах в общей сети.
 
 ```
-FastAPI (порт 8000) ──HTTP──► telemt API (порт 9091) ──► telemt proxy (порт 443)
+FastAPI (порт 8080) ──HTTP──► telemt API (порт 9091) ──► telemt proxy (порт 443)
 ```
 
 ## API

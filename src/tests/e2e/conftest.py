@@ -1,14 +1,16 @@
+import os
+
 import httpx
 import pytest
 
-BASE_URL = "http://127.0.0.1:8000/api"
+BASE_URL = os.getenv("E2E_BASE_URL", "http://127.0.0.1:8080/api")
 
 
 def _api_is_reachable() -> bool:
     try:
         httpx.get(BASE_URL, timeout=2)
         return True
-    except httpx.ConnectError:
+    except httpx.HTTPError:
         return False
 
 

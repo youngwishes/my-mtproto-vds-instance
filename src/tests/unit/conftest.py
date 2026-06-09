@@ -12,4 +12,4 @@ def _set_telemt_api_root(monkeypatch):
 
 @pytest.fixture
 def http_client() -> TestClient:
-    return TestClient(app=app, base_url="http://127.0.0.1:8000/api")
+    return TestClient(app=app, base_url="http://127.0.0.1:8080/api")
