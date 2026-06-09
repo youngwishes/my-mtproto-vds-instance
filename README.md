@@ -37,3 +37,4 @@ uv run pytest src/tests/e2e/     # e2e (требуются запущенные 
 - [Архитектура](docs/ARCHITECTURE.md) — место в системе, стек, структура проекта
 - [Контракты API](docs/CONTRACTS.md) — эндпоинты, запросы, ответы
 - [Telemt](docs/TELEMT.md) — описание прокси-сервера и его API
+- [Деплой](docs/DEPLOY.md) — автоматизированный деплой через Ansible
