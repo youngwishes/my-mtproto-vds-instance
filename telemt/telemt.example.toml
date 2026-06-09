@@ -26,7 +26,7 @@ whitelist = []
 read_only = false
 
 [censorship]
-tls_domain = "drive.google.com"
+tls_domain = "beatvault.ru"
 mask = true
 mask_port = 443
 fake_cert_len = 2048
