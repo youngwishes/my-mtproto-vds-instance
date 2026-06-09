@@ -1,4 +1,13 @@
 services:
+  telemt-setup:
+    image: alpine:3
+    restart: "no"
+    volumes:
+      - ./telemt:/etc/telemt:rw
+    command: >
+      sh -c '[ -f /etc/telemt/telemt.toml ] ||
+      cp /etc/telemt/telemt.example.toml /etc/telemt/telemt.toml'
+
   telemt:
     image: ghcr.io/telemt/telemt:latest
     container_name: telemt
@@ -7,13 +16,7 @@ services:
     working_dir: /run/telemt
     environment:
       RUST_LOG: "info"
-    entrypoint:
-      - /bin/sh
-      - -c
-      - >-
-        [ -f /etc/telemt/telemt.toml ] ||
-        cp /etc/telemt/telemt.example.toml /etc/telemt/telemt.toml &&
-        exec /usr/local/bin/telemt /etc/telemt/telemt.toml
+    command: /usr/local/bin/telemt /etc/telemt/telemt.toml
     volumes:
       - ./telemt:/etc/telemt:rw
     security_opt:
@@ -33,7 +36,10 @@ services:
           cpus: "0.50"
           memory: 256M
     depends_on:
-      - api
+      api:
+        condition: service_started
+      telemt-setup:
+        condition: service_completed_successfully
     networks:
       - telemt-network
     ulimits:
