@@ -7,10 +7,13 @@ services:
     working_dir: /run/telemt
     environment:
       RUST_LOG: "info"
-    command: >
-      sh -c '{ [ -f /etc/telemt/telemt.toml ] ||
-      cp /etc/telemt/telemt.example.toml /etc/telemt/telemt.toml; } &&
-      exec /usr/local/bin/telemt /etc/telemt/telemt.toml'
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        [ -f /etc/telemt/telemt.toml ] ||
+        cp /etc/telemt/telemt.example.toml /etc/telemt/telemt.toml &&
+        exec /usr/local/bin/telemt /etc/telemt/telemt.toml
     volumes:
       - ./telemt:/etc/telemt:rw
     security_opt:
