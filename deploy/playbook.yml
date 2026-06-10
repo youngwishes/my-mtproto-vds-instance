@@ -77,6 +77,12 @@
         remote_src: true
         force: false
 
+    - name: Stop existing containers
+      shell:
+        cmd: docker compose down --remove-orphans
+        chdir: "{{ deploy_dir }}"
+      ignore_errors: true
+
     - name: Start containers
       shell:
         cmd: docker compose up -d --build
