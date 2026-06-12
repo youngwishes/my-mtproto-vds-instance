@@ -53,3 +53,16 @@ def test_add_new_user_schema(http_client: TestClient, httpx_mock):
     assert response.json().get("key") == "test"
     assert response.json().get("tls_domain") == config.TLS_DOMAIN
 
+
+def test_add_user_when_already_exists_returns_409(http_client: TestClient, httpx_mock):
+    httpx_mock.add_response(
+        status_code=409,
+        json={"ok": False, "error": {"code": "user_exists", "message": "User already exists"}},
+    )
+
+    response = http_client.post(
+        "/users", json={"username": "John", "secret": "test"}
+    )
+    assert response.status_code == status.HTTP_409_CONFLICT
+    assert response.json() == {"detail": "User already exists"}
+

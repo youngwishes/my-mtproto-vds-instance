@@ -54,3 +54,19 @@ def test_rotate_secret(http_client: TestClient, httpx_mock):
     assert response.status_code == status.HTTP_200_OK
     assert response.json().get("key") == "new_secret"
     assert response.json().get("tls_domain") == config.TLS_DOMAIN
+
+
+def test_rotate_secret_when_user_not_found_returns_404(http_client: TestClient, httpx_mock):
+    httpx_mock.add_response(
+        status_code=404,
+        json={"ok": False, "error": {"code": "not_found", "message": "User not found"}},
+        method="PATCH",
+        url="http://172.17.0.1:9091/v1/users/john",
+    )
+
+    response = http_client.patch(
+        "/users",
+        json={"username": "John", "secret": "new_secret"},
+    )
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert response.json() == {"detail": "User not found"}

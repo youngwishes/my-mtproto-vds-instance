@@ -28,7 +28,8 @@ uv run pytest src/tests/e2e/
 ruff check src/
 
 # Build and run with Docker
-docker-compose up --build
+docker-compose up --build                                   # продакшн
+docker-compose -f docker-compose.local.yaml up --build     # локально
 ```
 
 ## Architecture
@@ -55,6 +56,12 @@ RESTful API с единственным ресурсом `/api/users`:
 ## Project Structure
 
 ```
+deploy/               # Ansible для деплоя на VDS
+├── playbook.yml
+├── inventory.ini
+└── ansible.cfg
+telemt/               # Конфиг telemt-процесса (из telemt.example.toml)
+└── telemt.toml
 src/
 ├── app.py
 ├── config.py
@@ -76,14 +83,45 @@ src/
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `TELEMT_API_ROOT` | Base URL for telemt HTTP API | — |
+| `TELEMT_API_ROOT` | Base URL for telemt HTTP API | `"http://telemt:9091/v1"` |
 | `TLS_DOMAIN` | TLS domain returned in responses | `"petrovich.ru"` |
+| `E2E_BASE_URL` | Base URL for e2e tests | `"http://127.0.0.1:8080/api"` |
 
 ## Rules
 
 1. **Документация** — после любых изменений в коде обновляй соответствующие файлы в `docs/`, `CLAUDE.md` и `README.md`, если изменения затрагивают описанное в них.
 2. **Тесты** — всегда прогоняй и unit, и e2e тесты (`uv run pytest`). Если e2e тесты скипаются — попроси пользователя поднять контейнеры (`docker-compose up --build`) и дождись подтверждения перед тем как считать задачу завершённой.
 3. **Git** — никогда не делай `git commit` и `git push`. Коммиты и пуши выполняет только пользователь.
+
+## Local Testing
+
+Для ручного тестирования и e2e-тестов нужны запущенные контейнеры.
+
+```bash
+# Поднять локально (telemt + api)
+docker-compose -f docker-compose.local.yaml up --build -d
+
+# Остановить
+docker-compose -f docker-compose.local.yaml down
+
+# Проверить список пользователей telemt напрямую
+curl -s http://127.0.0.1:9091/v1/users | python3 -m json.tool
+
+# POST — создать пользователя
+curl -s -X POST http://127.0.0.1:8080/api/users \
+  -H "Content-Type: application/json" \
+  -d '{"username":"test-user","secret":"aaaabbbbccccddddaaaabbbbccccdddd"}'
+
+# PATCH — ротация секрета
+curl -s -X PATCH http://127.0.0.1:8080/api/users \
+  -H "Content-Type: application/json" \
+  -d '{"username":"test-user","secret":"11112222333344441111222233334444"}'
+
+# DELETE — массовое удаление
+curl -s -X DELETE http://127.0.0.1:8080/api/users \
+  -H "Content-Type: application/json" \
+  -d '{"usernames":["test-user"]}'
+```
 
 ## Testing Notes
 
