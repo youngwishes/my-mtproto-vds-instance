@@ -40,6 +40,7 @@ docker-compose -f docker-compose.local.yaml up --build     # локально
 
 RESTful API с единственным ресурсом `/api/users`:
 - **POST** — создание пользователя
+- **GET** `/api/users/{username}` — проверка наличия пользователя в конфиге telemt (200/404)
 - **PATCH** — ротация секрета (перевыпуск ссылки)
 - **DELETE** — массовое удаление пользователей
 
@@ -50,6 +51,7 @@ RESTful API с единственным ресурсом `/api/users`:
 Сервисы — frozen dataclasses с `__call__`. Делают async HTTP-запросы к telemt API через `httpx.AsyncClient`. Инстанцируются inline в хендлерах.
 
 - `AddUserService` — регистрация пользователя (лимит 3 IP)
+- `GetUserService` — проверка наличия пользователя в конфиге telemt (возвращает username + tg://-ссылку)
 - `RotateSecretService` — перевыпуск секрета при компрометации ссылки
 - `RemoveUserService` — массовая очистка протухших ключей (celery-задача, ежедневно)
 
@@ -72,6 +74,7 @@ src/
 │       └── add_new_user_schema.py
 ├── services/
 │   ├── add_user_service.py
+│   ├── get_user_service.py
 │   ├── rotate_secret_service.py
 │   └── remove_user_service.py
 └── tests/
@@ -90,8 +93,8 @@ src/
 ## Rules
 
 1. **Документация** — после любых изменений в коде обновляй соответствующие файлы в `docs/`, `CLAUDE.md` и `README.md`, если изменения затрагивают описанное в них.
-2. **Тесты** — всегда прогоняй и unit, и e2e тесты (`uv run pytest`). Если e2e тесты скипаются — попроси пользователя поднять контейнеры (`docker-compose up --build`) и дождись подтверждения перед тем как считать задачу завершённой.
-3. **Git** — никогда не делай `git commit` и `git push`. Коммиты и пуши выполняет только пользователь.
+2. **Тесты** — всегда прогоняй и unit, и e2e тесты (`uv run pytest`). Если e2e тесты скипаются — подними контейнеры сам (`docker-compose -f docker-compose.local.yaml up --build -d`), дождись их готовности и прогони e2e перед тем как считать задачу завершённой. Спрашивать разрешение на подъём контейнеров не нужно.
+3. **Git** — можно делать `git commit` самостоятельно. `git push` — только по явной просьбе пользователя.
 
 ## Local Testing
 
@@ -111,6 +114,9 @@ curl -s http://127.0.0.1:9091/v1/users | python3 -m json.tool
 curl -s -X POST http://127.0.0.1:8080/api/users \
   -H "Content-Type: application/json" \
   -d '{"username":"test-user","secret":"aaaabbbbccccddddaaaabbbbccccdddd"}'
+
+# GET — проверить наличие пользователя (200/404)
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/api/users/test-user
 
 # PATCH — ротация секрета
 curl -s -X PATCH http://127.0.0.1:8080/api/users \

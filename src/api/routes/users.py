@@ -2,10 +2,20 @@ from fastapi import APIRouter
 from fastapi.params import Body
 from starlette import status
 
-from src.api.schemas import AddNewUserResponse
-from src.services import AddUserService, RemoveUserService, RotateSecretService
+from src.api.schemas import AddNewUserResponse, GetUserResponse
+from src.services import (
+    AddUserService,
+    GetUserService,
+    RemoveUserService,
+    RotateSecretService,
+)
 
 router = APIRouter(prefix="/api", tags=["users"])
+
+
+@router.get("/users/{username}", response_model=GetUserResponse)
+async def get_user(username: str) -> GetUserResponse:
+    return await GetUserService(username=username)()
 
 
 @router.post("/users", response_model=AddNewUserResponse)

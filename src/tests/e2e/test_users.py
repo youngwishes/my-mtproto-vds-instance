@@ -35,6 +35,27 @@ class TestAddUser:
 
 
 @requires_containers
+class TestGetUser:
+    def test_existing_user_returns_200(self, api: httpx.Client):
+        user = _random_user()
+        api.post("/users", json=user)
+
+        response = api.get(f"/users/{user['username']}")
+
+        assert response.status_code == status.HTTP_200_OK
+        body = response.json()
+        assert body["username"] == user["username"].lower()
+        assert user["secret"] in body["link"]
+
+        api.request("DELETE", "/users", json={"usernames": [user["username"]]})
+
+    def test_unknown_user_returns_404(self, api: httpx.Client):
+        response = api.get(f"/users/{uuid.uuid4()}")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+@requires_containers
 class TestRotateSecret:
     def test_success(self, api: httpx.Client):
         user = _random_user()

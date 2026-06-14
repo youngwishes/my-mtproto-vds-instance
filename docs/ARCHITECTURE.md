@@ -45,6 +45,7 @@ src/
 │       └── add_new_user_schema.py  # Pydantic-модель ответа
 ├── services/
 │   ├── add_user_service.py
+│   ├── get_user_service.py
 │   ├── rotate_secret_service.py
 │   └── remove_user_service.py
 └── tests/
