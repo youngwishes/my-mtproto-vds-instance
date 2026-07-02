@@ -9,7 +9,7 @@ services:
       cp /etc/telemt/telemt.example.toml /etc/telemt/telemt.toml'
 
   telemt:
-    image: ghcr.io/telemt/telemt:latest
+    image: ghcr.io/telemt/telemt:3.4.6
     container_name: telemt
     restart: unless-stopped
     user: "root"
