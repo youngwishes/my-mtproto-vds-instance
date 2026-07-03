@@ -1,93 +1,179 @@
 # Деплой
 
-Автоматизированный деплой через Ansible. Один плейбук разворачивает сервис на любом количестве VDS с нуля.
+В репозитории есть два разных контура Ansible:
 
-## Что делает плейбук
+- `deploy/playbook.yml` — первоначальное развёртывание нового пустого VDS;
+- отдельные playbooks `telemt-syn-limit*.yml` — установка и rollback SYN limiter
+  на уже работающих хостах.
 
-1. Создаёт swap 2GB (если нет), выставляет `vm.swappiness=10`
-2. Устанавливает `git` и Docker (если не установлен)
-3. Клонирует репозиторий в `/opt/mtproto` (при повторном запуске — обновляет)
-4. Создаёт `.env` из `.env.example` (пропускает если уже существует)
-5. Запускает контейнеры: `docker compose up -d --build`
+Не запускайте `deploy/playbook.yml` для обновления Telemt или SYN limiter на
+существующем production. Полный playbook обновляет репозиторий, собирает образы
+и запускает Compose, поэтому его область изменений существенно шире limiter.
 
-`telemt.toml` создаётся автоматически из `telemt.example.toml` init-контейнером при первом старте.
+## Inventory и окружения
 
-Размер swap можно изменить через переменную в `playbook.yml`:
+В `deploy/inventory.ini` определены группы:
 
-```yaml
-vars:
-  swap_size_mb: 2048  # 2GB по умолчанию
-```
+- `mtproto_dev` — только `vds6`;
+- `mtproto_prod` — только `vds1`–`vds5`;
+- `mtproto_servers` — все хосты, используется bootstrap-playbook.
 
-## Структура
-
-```
-deploy/
-├── ansible.cfg      # настройки Ansible (inventory, отключение host key check)
-├── inventory.ini    # список серверов
-└── playbook.yml     # шаги деплоя
-```
-
-## Предварительная настройка (один раз)
-
-### 1. Установить Ansible
+Все команды ниже запускаются из корня репозитория. Для локальных временных
+файлов Ansible используется каталог `/tmp`:
 
 ```bash
-brew install ansible
+export ANSIBLE_LOCAL_TEMP=/tmp/ansible-local
 ```
 
-### 2. Закинуть deploy-ключ на сервер
+Перед работой проверьте состояние репозитория и связь с нужным хостом:
 
 ```bash
-ssh-copy-id -i ~/.ssh/id_ed25519_deploy.pub root@<ip>
+git status --short
+ansible -i deploy/inventory.ini vds6 -m ping
 ```
 
-Если ключа нет — сначала создать:
+Не выводите `telemt.toml`, пользовательские ключи и полные proxy-ссылки.
+
+## Локальная проверка SYN limiter
+
+Перед любым применением:
 
 ```bash
-ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_deploy -N "" -C "ansible-deploy"
+uv run pytest deploy/tests/test_telemt_syn_limit.py -q
+ansible-playbook -i deploy/inventory.ini \
+  deploy/telemt-syn-limit.yml --syntax-check
+ansible-playbook -i deploy/inventory.ini \
+  deploy/telemt-syn-limit-prod.yml --syntax-check
+ansible-playbook -i deploy/inventory.ini \
+  deploy/telemt-syn-limit-rollback.yml --syntax-check
+bash -n deploy/roles/telemt_syn_limit/files/telemt-syn-limit
+git diff --check
 ```
 
-### 3. Проверить связь
+## Установка limiter на dev
+
+Dev-playbook должен запускаться только с явным ограничением `vds6`:
 
 ```bash
-cd deploy/
-ansible all -m ping
+ansible-playbook -i deploy/inventory.ini \
+  deploy/telemt-syn-limit.yml --limit vds6
 ```
 
-Ожидаемый результат: `pong` от всех серверов.
-
-## Деплой
+Проверка на сервере:
 
 ```bash
-cd deploy/
-
-# На все серверы
-ansible-playbook playbook.yml
-
-# На конкретный сервер
-ansible-playbook playbook.yml --limit vds2
+systemctl is-enabled telemt-syn-limit
+systemctl is-active telemt-syn-limit
+iptables -vnL DOCKER-USER --line-numbers
+iptables -vnL TELEMT_SYN_LIMIT --line-numbers
 ```
 
-## Добавить новый сервер
+Должен присутствовать ровно один переход из `DOCKER-USER`. Проверенный профиль:
+порт `443`, rate `54/minute`, burst `5`, превышение отклоняется TCP RST.
 
-1. Добавить запись в `deploy/inventory.ini`:
+## Read-only аудит production
 
-```ini
-[mtproto_servers]
-vds1 ansible_host=5.253.188.65
-vds2 ansible_host=82.47.169.229
-vds3 ansible_host=<новый ip>   ← добавить
-```
+Перед каждым production rollout для `vds1`–`vds5` зафиксируйте без изменения
+хостов:
 
-2. Закинуть deploy-ключ:
+- образ, версию, status и `StartedAt` Telemt;
+- `StartedAt` FastAPI-контейнера;
+- default IPv4 interface и наличие `DOCKER-USER`;
+- состояние `telemt-syn-limit.service`;
+- SHA-256 файла `telemt.toml`.
+
+Остановитесь, если хотя бы один хост недоступен, Telemt не запущен или цепочка
+`DOCKER-USER` отсутствует.
+
+## Миграция Telemt на 3.4.22
+
+Миграция выполняется сначала только на canary `vds1`. Нельзя менять
+`telemt.toml`, TLS-домен, DNS, пользовательские ключи или FastAPI-контейнер.
+
+1. Создайте backup `telemt.toml` с mode `0600` и зафиксируйте исходный SHA-256.
+2. Создайте отдельные Compose override-файлы для `3.4.22` и rollback `3.4.6`.
+3. Выполните `docker compose ... config --images` для обоих вариантов.
+4. Сначала загрузите `ghcr.io/telemt/telemt:3.4.22`.
+5. Пересоздайте только сервис `telemt`:
 
 ```bash
-ssh-copy-id -i ~/.ssh/id_ed25519_deploy.pub root@<новый ip>
+cd /opt/mtproto
+docker compose -f docker-compose.yaml \
+  -f /root/telemt-3.4.22.override.yml \
+  up -d --no-deps --force-recreate telemt
 ```
 
-3. Задеплоить:
+После запуска проверьте version/health, неизменность checksum и `StartedAt`
+FastAPI. Контракт FastAPI проверяется временным пользователем по полному циклу:
+create, read, rotate, read, delete, затем `404`. Значения ключей и ссылок не
+должны попадать в вывод. После проверки восстановите точную backup-копию
+`telemt.toml`, поскольку Telemt может канонически переписать TOML даже после
+удаления временного пользователя.
+
+При ошибке health или контракта немедленно пересоздайте только Telemt через
+override `3.4.6` и проверьте исходный checksum.
+
+## Production canary limiter
+
+После успешной проверки Telemt `3.4.22` установите limiter только на `vds1`:
 
 ```bash
-ansible-playbook playbook.yml --limit vds3
+ansible-playbook -i deploy/inventory.ini \
+  deploy/telemt-syn-limit-prod.yml --limit vds1
 ```
+
+После применения подтвердите:
+
+- service enabled/active;
+- ровно один переход в limiter-chain;
+- rate `54/minute`, burst `5` и TCP RST;
+- неизменные Telemt config checksum и FastAPI `StartedAt`;
+- Telemt `3.4.22` healthy.
+
+## Observation gate
+
+После canary действует минимум 24-часовой observation gate. В этот период
+контролируются подключения, RETURN/REJECT, handshake/SNI-ошибки, health,
+uptime, операции с ключами и жалобы пользователей за CGNAT.
+
+Не раскатывайте изменения на `vds2–vds5` до завершения gate и отдельного
+подтверждения владельца системы.
+
+## Rollback canary
+
+Отключить limiter только на `vds1`:
+
+```bash
+ansible-playbook -i deploy/inventory.ini \
+  deploy/telemt-syn-limit-rollback.yml --limit vds1
+```
+
+После rollback проверьте удаление limiter-chain и неизменность Telemt/API.
+Rollback limiter не меняет версию Telemt.
+
+## Fleet rollout
+
+Этот шаг разрешён только после успешного observation gate и отдельного
+подтверждения. Playbook выполняется serially:
+
+```bash
+ansible-playbook -i deploy/inventory.ini \
+  deploy/telemt-syn-limit-prod.yml --limit 'vds2:vds3:vds4:vds5'
+```
+
+После каждого хоста проверяйте service, единственный jump, счётчики, Telemt
+version/health/uptime и config checksum. При первом расхождении остановите
+rollout и выполните rollback только на затронутом хосте.
+
+## Bootstrap нового VDS
+
+`deploy/playbook.yml` допустим только для согласованного первоначального
+развёртывания нового пустого сервера. Он устанавливает системные зависимости,
+клонирует репозиторий и запускает весь Compose stack.
+
+```bash
+ansible-playbook -i deploy/inventory.ini \
+  deploy/playbook.yml --limit <new-host>
+```
+
+Никогда не запускайте bootstrap без `--limit`.

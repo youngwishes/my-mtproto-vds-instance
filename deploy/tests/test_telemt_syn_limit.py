@@ -98,3 +98,16 @@ def test_rollback_is_serial_and_only_disables_limiter() -> None:
     assert "enabled: false" in playbook
     assert "role: telemt_syn_limit" not in playbook
     assert "telemt" not in playbook.replace("telemt-syn-limit.service", "")
+
+
+def test_deploy_docs_describe_safe_limiter_rollout() -> None:
+    docs = (ROOT.parent / "docs" / "DEPLOY.md").read_text()
+
+    assert "Не запускайте `deploy/playbook.yml`" in docs
+    assert "mtproto_dev" in docs
+    assert "mtproto_prod" in docs
+    assert "--limit vds6" in docs
+    assert "--limit vds1" in docs
+    assert "telemt-syn-limit-rollback.yml" in docs
+    assert "24" in docs
+    assert "vds2–vds5" in docs
