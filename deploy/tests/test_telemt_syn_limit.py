@@ -104,6 +104,7 @@ def test_deploy_docs_describe_safe_limiter_rollout() -> None:
     docs = (ROOT.parent / "docs" / "DEPLOY.md").read_text()
 
     assert "Не запускайте `deploy/playbook.yml`" in docs
+    assert "`deploy/playbook.yml` не устанавливает SYN limiter" in docs
     assert "mtproto_dev" in docs
     assert "mtproto_prod" in docs
     assert "--limit vds6" in docs

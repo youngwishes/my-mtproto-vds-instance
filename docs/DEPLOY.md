@@ -8,7 +8,8 @@
 
 Не запускайте `deploy/playbook.yml` для обновления Telemt или SYN limiter на
 существующем production. Полный playbook обновляет репозиторий, собирает образы
-и запускает Compose, поэтому его область изменений существенно шире limiter.
+и запускает Compose. При этом `deploy/playbook.yml` не устанавливает SYN limiter:
+для limiter используются только отдельные playbooks, перечисленные ниже.
 
 ## Inventory и окружения
 
