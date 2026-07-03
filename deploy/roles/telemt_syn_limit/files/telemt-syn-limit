@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CHAIN="TELEMT_SYN_LIMIT"
+INTERFACE="${TELEMT_SYN_INTERFACE:-${2:-}}"
+PORT="${TELEMT_SYN_PORT:-443}"
+RATE="${TELEMT_SYN_RATE:-54/minute}"
+BURST="${TELEMT_SYN_BURST:-5}"
+
+remove_rules() {
+    if [[ -z "$INTERFACE" ]]; then
+        echo "TELEMT_SYN_INTERFACE is required" >&2
+        return 2
+    fi
+
+    while iptables -w -C DOCKER-USER \
+        -i "$INTERFACE" -p tcp --dport "$PORT" --syn \
+        -j "$CHAIN" 2>/dev/null; do
+        iptables -w -D DOCKER-USER \
+            -i "$INTERFACE" -p tcp --dport "$PORT" --syn \
+            -j "$CHAIN"
+    done
+
+    iptables -w -F "$CHAIN" 2>/dev/null || true
+    iptables -w -X "$CHAIN" 2>/dev/null || true
+}
+
+apply_rules() {
+    if [[ -z "$INTERFACE" ]]; then
+        echo "TELEMT_SYN_INTERFACE is required" >&2
+        return 2
+    fi
+
+    iptables -w -nL DOCKER-USER >/dev/null
+    remove_rules
+    iptables -w -N "$CHAIN"
+    iptables -w -A "$CHAIN" \
+        -m hashlimit \
+        --hashlimit-name telemt_syn_443 \
+        --hashlimit-mode srcip \
+        --hashlimit-upto "$RATE" \
+        --hashlimit-burst "$BURST" \
+        --hashlimit-htable-expire 60000 \
+        --hashlimit-htable-size 32768 \
+        -j RETURN
+    iptables -w -A "$CHAIN" -p tcp \
+        -j REJECT --reject-with tcp-reset
+    iptables -w -I DOCKER-USER 1 \
+        -i "$INTERFACE" -p tcp --dport "$PORT" --syn \
+        -j "$CHAIN"
+}
+
+case "${1:-start}" in
+    start)
+        apply_rules
+        ;;
+    stop)
+        remove_rules
+        ;;
+    *)
+        echo "usage: $0 {start|stop}" >&2
+        exit 2
+        ;;
+esac

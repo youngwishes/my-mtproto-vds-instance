@@ -1,0 +1,6 @@
+---
+- name: Install Docker-aware Telemt SYN limiter on dev
+  hosts: mtproto_dev
+  become: true
+  roles:
+    - role: telemt_syn_limit

@@ -1,0 +1,42 @@
+---
+- name: Check Docker forwarding chain
+  ansible.builtin.command: iptables -w -nL DOCKER-USER
+  register: telemt_syn_limit_docker_user
+  changed_when: false
+  failed_when: false
+
+- name: Require Docker forwarding chain
+  ansible.builtin.assert:
+    that:
+      - telemt_syn_limit_docker_user.rc == 0
+    fail_msg: DOCKER-USER is unavailable; refusing to install the limiter
+
+- name: Install Telemt SYN limiter script
+  ansible.builtin.copy:
+    src: telemt-syn-limit
+    dest: /usr/local/sbin/telemt-syn-limit
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart Telemt SYN limiter
+
+- name: Install Telemt SYN limiter systemd unit
+  ansible.builtin.template:
+    src: telemt-syn-limit.service.j2
+    dest: /etc/systemd/system/telemt-syn-limit.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: telemt_syn_limit_unit
+  notify: Restart Telemt SYN limiter
+
+- name: Reload systemd units
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: telemt_syn_limit_unit.changed
+
+- name: Enable and start Telemt SYN limiter
+  ansible.builtin.systemd_service:
+    name: telemt-syn-limit.service
+    enabled: true
+    state: started
