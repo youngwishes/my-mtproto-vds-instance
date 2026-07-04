@@ -1,0 +1,41 @@
+---
+- name: Ensure OpenSSH drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Disable SSH password authentication
+  ansible.builtin.template:
+    src: 00-00-disable-password-auth.conf.j2
+    dest: /etc/ssh/sshd_config.d/00-00-disable-password-auth.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  register: ssh_hardening_config
+
+- name: Remove legacy SSH hardening drop-in
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d/00-disable-password-auth.conf
+    state: absent
+  register: ssh_hardening_legacy_config
+
+- name: Validate effective SSH daemon configuration
+  ansible.builtin.command: sshd -t
+  changed_when: false
+
+- name: Reload SSH daemon
+  ansible.builtin.service:
+    name: ssh
+    state: reloaded
+  when: ssh_hardening_config.changed or ssh_hardening_legacy_config.changed
+
+- name: Reset the current SSH connection
+  ansible.builtin.meta: reset_connection
+
+- name: Verify SSH key reconnection
+  ansible.builtin.wait_for_connection:
+    timeout: 30

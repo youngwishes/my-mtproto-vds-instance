@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_syn_limit_playbook_targets_only_dev_group() -> None:
-    inventory = (ROOT / "inventory.ini").read_text()
+    inventory = (ROOT / "inventory.example.ini").read_text()
     playbook = (ROOT / "telemt-syn-limit.yml").read_text()
 
     assert "[mtproto_dev]" in inventory
@@ -66,7 +66,7 @@ def _inventory_group(inventory: str, group: str) -> list[str]:
 
 
 def test_inventory_has_exact_dev_and_prod_groups() -> None:
-    inventory = (ROOT / "inventory.ini").read_text()
+    inventory = (ROOT / "inventory.example.ini").read_text()
 
     assert _inventory_group(inventory, "mtproto_dev") == ["vds6"]
     assert _inventory_group(inventory, "mtproto_prod") == [
