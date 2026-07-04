@@ -1,0 +1,78 @@
+---
+- name: Check if swap already exists
+  ansible.builtin.stat:
+    path: /swapfile
+  register: mtproto_swapfile
+
+- name: Create swap file
+  ansible.builtin.command: fallocate -l {{ mtproto_swap_size_mb }}M /swapfile
+  when: not mtproto_swapfile.stat.exists
+
+- name: Set swap file permissions
+  ansible.builtin.file:
+    path: /swapfile
+    mode: "0600"
+  when: not mtproto_swapfile.stat.exists
+
+- name: Format swap
+  ansible.builtin.command: mkswap /swapfile
+  when: not mtproto_swapfile.stat.exists
+
+- name: Enable swap
+  ansible.builtin.command: swapon /swapfile
+  when: not mtproto_swapfile.stat.exists
+
+- name: Persist swap in fstab
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    line: /swapfile none swap sw 0 0
+    state: present
+
+- name: Set swappiness to 10
+  ansible.posix.sysctl:
+    name: vm.swappiness
+    value: "10"
+    state: present
+    sysctl_file: /etc/sysctl.d/99-swappiness.conf
+
+- name: Install git
+  ansible.builtin.apt:
+    name: git
+    state: present
+    update_cache: true
+
+- name: Install Docker if not present
+  ansible.builtin.shell: curl -fsSL https://get.docker.com | sh
+  args:
+    creates: /usr/bin/docker
+
+- name: Ensure Docker is running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Clone or update repository
+  ansible.builtin.git:
+    repo: "{{ mtproto_repo_url }}"
+    dest: "{{ mtproto_deploy_dir }}"
+    version: "{{ mtproto_repo_branch }}"
+    force: true
+
+- name: Create .env from example (skip if already exists)
+  ansible.builtin.copy:
+    src: "{{ mtproto_deploy_dir }}/.env.example"
+    dest: "{{ mtproto_deploy_dir }}/.env"
+    remote_src: true
+    force: false
+
+- name: Stop existing containers
+  ansible.builtin.command:
+    cmd: docker compose down --remove-orphans
+    chdir: "{{ mtproto_deploy_dir }}"
+  failed_when: false
+
+- name: Start containers
+  ansible.builtin.command:
+    cmd: docker compose up -d --build
+    chdir: "{{ mtproto_deploy_dir }}"

@@ -1,0 +1,7 @@
+---
+- name: Deploy MTProto VDS Instance on development
+  hosts: mtproto_dev
+  become: true
+  roles:
+    - role: mtproto_deploy
+    - role: telemt_syn_limit

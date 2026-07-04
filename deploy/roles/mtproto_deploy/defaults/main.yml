@@ -1,0 +1,5 @@
+---
+mtproto_repo_url: https://github.com/youngwishes/my-mtproto-vds-instance.git
+mtproto_deploy_dir: /opt/mtproto
+mtproto_repo_branch: main
+mtproto_swap_size_mb: 2048

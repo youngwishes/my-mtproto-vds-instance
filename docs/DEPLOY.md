@@ -1,15 +1,15 @@
 # Деплой
 
-В репозитории есть два разных контура Ansible:
+В репозитории есть два полных playbook для разных окружений:
 
-- `deploy/playbook.yml` — первоначальное развёртывание нового пустого VDS;
+- `deploy/playbook-dev.yml` — полный деплой на `mtproto_dev`;
+- `deploy/playbook-prod.yml` — последовательный полный деплой на `mtproto_prod`;
 - отдельные playbooks `telemt-syn-limit*.yml` — установка и rollback SYN limiter
   на уже работающих хостах.
 
-Не запускайте `deploy/playbook.yml` для обновления Telemt или SYN limiter на
-существующем production. Полный playbook обновляет репозиторий, собирает образы
-и запускает Compose. При этом `deploy/playbook.yml` не устанавливает SYN limiter:
-для limiter используются только отдельные playbooks, перечисленные ниже.
+Полные playbooks устанавливают системные зависимости, обновляют репозиторий,
+запускают Compose и затем устанавливают SYN limiter. Limiter-only playbooks
+используются, когда приложение обновлять не требуется.
 
 ## Inventory и окружения
 
@@ -17,7 +17,7 @@
 
 - `mtproto_dev` — только `vds6`;
 - `mtproto_prod` — только `vds1`–`vds5`;
-- `mtproto_servers` — все хосты, используется bootstrap-playbook.
+- `mtproto_servers` — объединённая группа всех хостов для ad-hoc проверок.
 
 Все команды ниже запускаются из корня репозитория. Для локальных временных
 файлов Ansible используется каталог `/tmp`:
@@ -41,6 +41,10 @@ ansible -i deploy/inventory.ini vds6 -m ping
 
 ```bash
 uv run pytest deploy/tests/test_telemt_syn_limit.py -q
+ansible-playbook -i deploy/inventory.ini \
+  deploy/playbook-dev.yml --syntax-check
+ansible-playbook -i deploy/inventory.ini \
+  deploy/playbook-prod.yml --syntax-check
 ansible-playbook -i deploy/inventory.ini \
   deploy/telemt-syn-limit.yml --syntax-check
 ansible-playbook -i deploy/inventory.ini \
@@ -166,15 +170,22 @@ ansible-playbook -i deploy/inventory.ini \
 version/health/uptime и config checksum. При первом расхождении остановите
 rollout и выполните rollback только на затронутом хосте.
 
-## Bootstrap нового VDS
+## Полный деплой
 
-`deploy/playbook.yml` допустим только для согласованного первоначального
-развёртывания нового пустого сервера. Он устанавливает системные зависимости,
-клонирует репозиторий и запускает весь Compose stack.
+Dev разворачивается только playbook, нацеленным на `mtproto_dev`:
 
 ```bash
 ansible-playbook -i deploy/inventory.ini \
-  deploy/playbook.yml --limit <new-host>
+  deploy/playbook-dev.yml
 ```
 
-Никогда не запускайте bootstrap без `--limit`.
+Production разворачивается отдельным playbook по одному хосту. При первой ошибке
+rollout прекращается:
+
+```bash
+ansible-playbook -i deploy/inventory.ini \
+  deploy/playbook-prod.yml
+```
+
+Оба playbook сначала разворачивают Compose stack, затем устанавливают и
+запускают `telemt-syn-limit.service`.

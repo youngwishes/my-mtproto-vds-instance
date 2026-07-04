@@ -87,6 +87,44 @@ def test_prod_playbook_is_serial_and_uses_role() -> None:
     assert "role: telemt_syn_limit" in playbook
 
 
+def test_full_deploy_playbooks_are_environment_specific() -> None:
+    dev = (ROOT / "playbook-dev.yml").read_text()
+    prod = (ROOT / "playbook-prod.yml").read_text()
+
+    assert not (ROOT / "playbook.yml").exists()
+    assert "hosts: mtproto_dev" in dev
+    assert "hosts: mtproto_prod" not in dev
+    assert "hosts: mtproto_prod" in prod
+    assert "hosts: mtproto_dev" not in prod
+    assert "serial: 1" in prod
+    assert "any_errors_fatal: true" in prod
+
+
+def test_full_deploy_playbooks_install_app_before_limiter() -> None:
+    for name in ("playbook-dev.yml", "playbook-prod.yml"):
+        playbook = (ROOT / name).read_text()
+
+        assert "role: mtproto_deploy" in playbook
+        assert "role: telemt_syn_limit" in playbook
+        assert playbook.index("role: mtproto_deploy") < playbook.index(
+            "role: telemt_syn_limit"
+        )
+
+
+def test_mtproto_deploy_role_owns_full_application_deployment() -> None:
+    role = ROOT / "roles" / "mtproto_deploy"
+    defaults = (role / "defaults" / "main.yml").read_text()
+    tasks = (role / "tasks" / "main.yml").read_text()
+
+    assert "mtproto_repo_url:" in defaults
+    assert "mtproto_deploy_dir:" in defaults
+    assert "mtproto_repo_branch:" in defaults
+    assert "mtproto_swap_size_mb:" in defaults
+    assert "Ensure Docker is running" in tasks
+    assert "Clone or update repository" in tasks
+    assert "docker compose up -d --build" in tasks
+
+
 def test_rollback_is_serial_and_only_disables_limiter() -> None:
     playbook = (ROOT / "telemt-syn-limit-rollback.yml").read_text()
 
@@ -103,8 +141,9 @@ def test_rollback_is_serial_and_only_disables_limiter() -> None:
 def test_deploy_docs_describe_safe_limiter_rollout() -> None:
     docs = (ROOT.parent / "docs" / "DEPLOY.md").read_text()
 
-    assert "Не запускайте `deploy/playbook.yml`" in docs
-    assert "`deploy/playbook.yml` не устанавливает SYN limiter" in docs
+    assert "deploy/playbook.yml" not in docs
+    assert "deploy/playbook-dev.yml" in docs
+    assert "deploy/playbook-prod.yml" in docs
     assert "mtproto_dev" in docs
     assert "mtproto_prod" in docs
     assert "--limit vds6" in docs
@@ -112,3 +151,22 @@ def test_deploy_docs_describe_safe_limiter_rollout() -> None:
     assert "telemt-syn-limit-rollback.yml" in docs
     assert "24" in docs
     assert "vds2–vds5" in docs
+
+
+def test_limiter_documentation_describes_completed_current_state() -> None:
+    docs = (ROOT / "TELEMT-SYN-LIMIT.md").read_text()
+
+    assert "## Текущее состояние" in docs
+    assert "playbook-dev.yml" in docs
+    assert "playbook-prod.yml" in docs
+    assert "54/minute" in docs
+    assert "burst `5`" in docs
+    assert "tcp-reset" in docs
+    assert "## Проверка" in docs
+    assert "## Управление и rollback" in docs
+    assert "## Ограничение CGNAT" in docs
+    assert "Production rollout" not in docs
+    assert "Post-rollout" not in docs
+    assert "Observation gate" not in docs
+    assert "### vds" not in docs
+    assert "fingerprint" not in docs
