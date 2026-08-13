@@ -1,9 +1,6 @@
 from fastapi.testclient import TestClient
 from starlette import status
 
-from src import config
-
-
 TELEMT_ROTATE_SECRET_RESPONSE = {
     "ok": True,
     "data": {
@@ -52,8 +49,7 @@ def test_rotate_secret(http_client: TestClient, httpx_mock):
         json={"username": "John", "secret": "new_secret"},
     )
     assert response.status_code == status.HTTP_200_OK
-    assert response.json().get("key") == "new_secret"
-    assert response.json().get("tls_domain") == config.TLS_DOMAIN
+    assert response.json() == {"key": "new_secret"}
 
 
 def test_rotate_secret_when_user_not_found_returns_404(http_client: TestClient, httpx_mock):

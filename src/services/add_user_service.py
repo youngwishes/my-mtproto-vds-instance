@@ -15,8 +15,8 @@ class AddUserService:
 
     Создаёт учётную запись с переданным секретом и ограничением
     в 3 одновременных уникальных IP-адреса (≈ 3 устройства).
-    Возвращает параметры подключения, из которых внешний сервис
-    формирует tg:// ссылку для клиента.
+    Возвращает подтверждение с тем же секретом. Домен FakeTLS и итоговую
+    tg:// ссылку формирует внешний Django-бэкенд.
     """
 
     username: str
@@ -34,7 +34,4 @@ class AddUserService:
             )
             response.raise_for_status()
 
-        return AddNewUserResponse(
-            tls_domain=config.TLS_DOMAIN,
-            key=self.secret,
-        )
+        return AddNewUserResponse(key=self.secret)

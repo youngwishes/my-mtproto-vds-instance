@@ -30,7 +30,4 @@ class RotateSecretService:
             )
             response.raise_for_status()
 
-        return AddNewUserResponse(
-            tls_domain=config.TLS_DOMAIN,
-            key=self.secret,
-        )
+        return AddNewUserResponse(key=self.secret)

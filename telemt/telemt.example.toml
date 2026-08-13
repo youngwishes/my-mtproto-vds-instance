@@ -26,7 +26,8 @@ whitelist = []
 read_only = false
 
 [censorship]
-tls_domain = "beatvault.ru"
+tls_domain = "mtprotokeys.com"
+tls_domains = ["beatvault.ru"]
 mask = true
 mask_port = 443
 fake_cert_len = 2048

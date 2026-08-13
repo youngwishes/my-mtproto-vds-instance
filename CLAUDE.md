@@ -87,7 +87,6 @@ src/
 | Variable | Purpose | Default |
 |---|---|---|
 | `TELEMT_API_ROOT` | Base URL for telemt HTTP API | `"http://telemt:9091/v1"` |
-| `TLS_DOMAIN` | TLS domain returned in responses | `"petrovich.ru"` |
 | `E2E_BASE_URL` | Base URL for e2e tests | `"http://127.0.0.1:8080/api"` |
 
 ## Rules

@@ -1,9 +1,6 @@
 from fastapi.testclient import TestClient
 from starlette import status
 
-from src import config
-
-
 TELEMT_SUCESS_RESPONSE = {
     "ok": True,
     "data": {
@@ -50,8 +47,7 @@ def test_add_new_user_schema(http_client: TestClient, httpx_mock):
     response = http_client.post(
         "/users", json={"username": username, "secret": "test"}
     )
-    assert response.json().get("key") == "test"
-    assert response.json().get("tls_domain") == config.TLS_DOMAIN
+    assert response.json() == {"key": "test"}
 
 
 def test_add_user_when_already_exists_returns_409(http_client: TestClient, httpx_mock):
@@ -65,4 +61,3 @@ def test_add_user_when_already_exists_returns_409(http_client: TestClient, httpx
     )
     assert response.status_code == status.HTTP_409_CONFLICT
     assert response.json() == {"detail": "User already exists"}
-

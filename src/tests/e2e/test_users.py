@@ -22,9 +22,7 @@ class TestAddUser:
 
         assert response.status_code == status.HTTP_200_OK
 
-        body = response.json()
-        assert body["key"] == user["secret"]
-        assert body["tls_domain"]
+        assert response.json() == {"key": user["secret"]}
 
         api.request("DELETE", "/users", json={"usernames": [user["username"]]})
 
@@ -68,7 +66,7 @@ class TestRotateSecret:
         )
 
         assert response.status_code == status.HTTP_200_OK
-        assert response.json()["key"] == new_secret
+        assert response.json() == {"key": new_secret}
 
         api.request("DELETE", "/users", json={"usernames": [user["username"]]})
 
