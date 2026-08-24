@@ -26,12 +26,12 @@ read_only = false
 [[server.listeners]]
 ip = "0.0.0.0"
 port = 443
-synlimit = "iptables"
+synlimit = false
 
 [[server.listeners]]
 ip = "::"
 port = 443
-synlimit = "iptables"
+synlimit = false
 
 [censorship]
 tls_domain = "mtprotokeys.com"

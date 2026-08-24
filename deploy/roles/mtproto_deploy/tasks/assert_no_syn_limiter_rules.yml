@@ -1,0 +1,13 @@
+---
+- name: Verify Telemt SYN limiter rules are absent
+  ansible.builtin.assert:
+    that:
+      - >-
+        (telemt_iptables_rule_sets.results
+        | map(attribute='stdout')
+        | join('\n')
+        | regex_search('(?:TMT_SYN_[0-9a-f]{12}|TELEMT_SYNLIMIT)')) is none
+      - >-
+        (telemt_nft_tables.stdout
+        | regex_search('(?m)^table (?:inet|ip|ip6) telemt_synlimit(?:_[0-9a-f]{16})?$')) is none
+    fail_msg: Telemt SYN limiter firewall rules are still present

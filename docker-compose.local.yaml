@@ -6,13 +6,14 @@ services:
       - ./telemt:/etc/telemt:rw
     command: >
       sh -c '[ -f /etc/telemt/telemt.toml ] ||
-      cp /etc/telemt/telemt.example.toml /etc/telemt/telemt.toml'
+      cp /etc/telemt/telemt.example.toml /etc/telemt/telemt.toml;
+      sh /etc/telemt/disable-syn-limiter.sh /etc/telemt/telemt.toml'
 
   telemt:
-    image: telemt-netfilter:3.4.25
+    image: telemt:3.4.25
     build:
       context: https://github.com/telemt/telemt.git#3.4.25
-      target: prod-netfilter
+      target: prod
       args:
         TELEMT_REPOSITORY: telemt/telemt
         TELEMT_VERSION: 3.4.25
@@ -34,7 +35,6 @@ services:
       - ALL
     cap_add:
       - NET_BIND_SERVICE
-      - NET_ADMIN
     tmpfs:
       - /run/telemt:rw,mode=1777,size=4m
     deploy:

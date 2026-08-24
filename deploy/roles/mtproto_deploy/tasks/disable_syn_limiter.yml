@@ -1,0 +1,6 @@
+---
+- name: Disable built-in Telemt SYN limiter
+  ansible.builtin.replace:
+    path: "{{ telemt_config_path }}"
+    regexp: '^(\s*synlimit\s*=\s*)(?:"(?:iptables|nftables)"|''(?:iptables|nftables)'')(\s*(?:#.*)?)$'
+    replace: '\1false\2'

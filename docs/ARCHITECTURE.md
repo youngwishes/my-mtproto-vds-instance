@@ -69,4 +69,7 @@ telemt.service :9091 ──► MTProto :443
 
 Docker Compose добавляет `host.docker.internal` через `host-gateway`. Для
 локальных e2e-тестов отдельный `docker-compose.local.yaml` по-прежнему запускает
-оба сервиса в контейнерах.
+оба сервиса в контейнерах. Контейнер Telemt использует обычный production target
+без netfilter-пакетов и без `NET_ADMIN`; SYN-limiter отключён тем же example-
+конфигом, что используется при чистой установке на сервер. Одноразовый setup-
+контейнер также точечно мигрирует уже существующий локальный `telemt.toml`.

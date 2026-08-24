@@ -1,11 +1,10 @@
 # Деплой
 
 Репозиторий использует один production-playbook для всех актуальных серверов.
-Первую бинарную миграцию Telemt выполняйте только на canary `vds4`
-(`148.135.209.179`):
+Playbook обрабатывает их последовательно:
 
 ```bash
-ansible-playbook -i deploy/inventory.ini deploy/playbook.yml --limit vds4
+ansible-playbook -i deploy/inventory.ini deploy/playbook.yml
 ```
 
 Playbook обрабатывает серверы по одному и останавливается при первой ошибке. На
@@ -13,10 +12,10 @@ Playbook обрабатывает серверы по одному и остан
 зависимости, обновляет `/opt/mtproto` из ветки `main`, устанавливает Telemt как
 systemd-сервис и запускает FastAPI через Docker Compose.
 
-Команду без `--limit` используйте только после отдельной проверки canary:
+Для точечного повторного деплоя можно ограничить запуск одним сервером:
 
 ```bash
-ansible-playbook -i deploy/inventory.ini deploy/playbook.yml
+ansible-playbook -i deploy/inventory.ini deploy/playbook.yml --limit vds4
 ```
 
 ## Inventory
@@ -57,15 +56,24 @@ checksum и устанавливает бинарник в `/usr/local/bin/telem
 `x86_64` и `aarch64`.
 
 Telemt работает от системного пользователя `telemt`. Unit выдаёт только
-`CAP_NET_BIND_SERVICE` и `CAP_NET_ADMIN`, устанавливает `LimitNOFILE=65536` и
-запускает существующий `/opt/mtproto/telemt/telemt.toml`. Пакеты `iptables`,
-`nftables` и `conntrack` обеспечивают встроенный `synlimit = "iptables"`.
+`CAP_NET_BIND_SERVICE`, устанавливает `LimitNOFILE=65536` и запускает
+существующий `/opt/mtproto/telemt/telemt.toml`. Встроенный SYN-limiter Telemt
+отключён для всех listeners через `synlimit = false`; `CAP_NET_ADMIN` сервису
+не выдаётся.
 
 Существующий `/opt/mtproto/telemt/telemt.toml` при деплое не перезаписывается.
-После остановки старого контейнера роль запоминает SHA-256 файла и проверяет,
-что запуск systemd и read-only connectivity probe его не изменили. Владелец и
-права меняются на `telemt:telemt` и `0640`, чтобы HTTP API мог атомарно обновлять
-пользователей.
+Роль точечно заменяет только активные значения `synlimit = "iptables"` или
+`synlimit = "nftables"` (включая одинарные кавычки и inline-комментарии) на
+`synlimit = false`, сохраняя ключи, форматирование и остальные параметры. Перед
+изменением роль останавливает legacy-контейнер и systemd-сервис, чтобы ни один
+процесс Telemt не мог параллельно перезаписать файл. Затем роль запоминает
+SHA-256 уже мигрированного файла и проверяет, что запуск systemd и read-only
+connectivity probe его не изменили. Владелец и права меняются на
+`telemt:telemt` и `0640`, чтобы HTTP API мог атомарно обновлять пользователей.
+
+Пакеты `iptables`, `nftables` и `conntrack` остаются на хосте для Docker,
+хостового firewall и проверки отсутствия устаревших `TMT_SYN_*`-цепочек; Telemt
+их не использует.
 
 `.env` обновляется точечно:
 
@@ -83,7 +91,8 @@ systemctl is-active telemt
 /usr/local/bin/telemt --version
 /usr/local/bin/telemt healthcheck \
   /opt/mtproto/telemt/telemt.toml --mode liveness
-iptables-save | grep 'TMT_SYN_[0-9a-f]\{12\}'
+! { iptables-save; ip6tables-save; } | grep -E 'TMT_SYN_[0-9a-f]{12}|TELEMT_SYNLIMIT'
+! nft list tables | grep -E 'telemt_synlimit(_[0-9a-f]{16})?$'
 docker compose ps
 ```
 

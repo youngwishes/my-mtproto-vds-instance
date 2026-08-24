@@ -35,7 +35,7 @@
     state: present
     sysctl_file: /etc/sysctl.d/99-swappiness.conf
 
-- name: Install deployment and Telemt runtime dependencies
+- name: Install deployment and host runtime dependencies
   ansible.builtin.apt:
     name:
       - ca-certificates
@@ -239,7 +239,27 @@
     cmd: docker rm telemt
   when: legacy_telemt_container.rc == 0
 
-- name: Refresh Telemt config checksum after stopping the container
+- name: Stop Telemt systemd service before config migration
+  ansible.builtin.systemd_service:
+    name: "{{ telemt_service_name }}"
+    state: stopped
+    daemon_reload: true
+
+- name: Apply Telemt SYN limiter policy
+  ansible.builtin.import_tasks: disable_syn_limiter.yml
+
+- name: Verify Telemt config has no enabled SYN limiter
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -Eq
+      - "^[[:space:]]*synlimit[[:space:]]*=[[:space:]]*(\"(iptables|nftables)\"|'(iptables|nftables)')[[:space:]]*(#.*)?$"
+      - "{{ telemt_config_path }}"
+  register: telemt_enabled_syn_limiter
+  changed_when: false
+  failed_when: telemt_enabled_syn_limiter.rc != 1
+
+- name: Refresh Telemt config checksum after stopping its writers
   ansible.builtin.stat:
     path: "{{ telemt_config_path }}"
     checksum_algorithm: sha256
@@ -270,16 +290,23 @@
   delay: 5
   until: telemt_liveness.rc == 0
 
-- name: Verify built-in Telemt SYN limiter rules
+- name: Read host firewall rules after Telemt startup
   ansible.builtin.command:
-    cmd: iptables-save
-  register: telemt_iptables_rules
+    cmd: "{{ item }}"
+  loop:
+    - iptables-save
+    - ip6tables-save
+  register: telemt_iptables_rule_sets
   changed_when: false
-  retries: 6
-  delay: 5
-  until: >-
-    (telemt_iptables_rules.stdout
-    | regex_search('TMT_SYN_[0-9a-f]{12}')) is not none
+
+- name: Read native nftables tables after Telemt startup
+  ansible.builtin.command:
+    cmd: nft list tables
+  register: telemt_nft_tables
+  changed_when: false
+
+- name: Apply Telemt firewall policy assertions
+  ansible.builtin.import_tasks: assert_no_syn_limiter_rules.yml
 
 - name: Probe a missing user directly through Telemt
   ansible.builtin.uri:
