@@ -16,14 +16,22 @@ prefer = 4
 
 [server]
 port = 443
-listen_addr_ipv4 = "0.0.0.0"
-listen_addr_ipv6 = "::"
 
 [server.api]
 enabled = true
 listen = "0.0.0.0:9091"
 whitelist = []
 read_only = false
+
+[[server.listeners]]
+ip = "0.0.0.0"
+port = 443
+synlimit = "iptables"
+
+[[server.listeners]]
+ip = "::"
+port = 443
+synlimit = "iptables"
 
 [censorship]
 tls_domain = "mtprotokeys.com"

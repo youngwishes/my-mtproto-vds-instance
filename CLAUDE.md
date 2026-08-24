@@ -28,8 +28,8 @@ uv run pytest src/tests/e2e/
 ruff check src/
 
 # Build and run with Docker
-docker-compose up --build                                   # продакшн
-docker-compose -f docker-compose.local.yaml up --build     # локально
+docker compose up --build                                  # продакшн
+docker compose -f docker-compose.local.yaml up --build     # локально
 ```
 
 ## Architecture
@@ -61,7 +61,10 @@ RESTful API с единственным ресурсом `/api/users`:
 deploy/               # Ansible для деплоя на VDS
 ├── playbook.yml
 ├── inventory.ini
-└── ansible.cfg
+├── ansible.cfg
+└── roles/
+    ├── ssh_hardening/
+    └── mtproto_deploy/
 telemt/               # Конфиг telemt-процесса (из telemt.example.toml)
 └── telemt.toml
 src/
@@ -101,10 +104,10 @@ src/
 
 ```bash
 # Поднять локально (telemt + api)
-docker-compose -f docker-compose.local.yaml up --build -d
+docker compose -f docker-compose.local.yaml up --build -d
 
 # Остановить
-docker-compose -f docker-compose.local.yaml down
+docker compose -f docker-compose.local.yaml down
 
 # Проверить список пользователей telemt напрямую
 curl -s http://127.0.0.1:9091/v1/users | python3 -m json.tool

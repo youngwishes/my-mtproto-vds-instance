@@ -31,17 +31,14 @@ def test_ssh_role_disables_password_authentication_only() -> None:
     assert "00-disable-password-auth.conf" in tasks
 
 
-def test_ssh_hardening_rollout_is_dev_then_serial_prod() -> None:
-    dev = (ROOT / "ssh-hardening-dev.yml").read_text()
-    prod = (ROOT / "ssh-hardening-prod.yml").read_text()
+def test_single_deploy_hardens_ssh_before_installing_application() -> None:
+    playbook = (ROOT / "playbook.yml").read_text()
 
-    assert "hosts: mtproto_dev" in dev
-    assert "role: ssh_hardening" in dev
-    assert "gather_facts: false" in dev
-    assert "ansible.builtin.wait_for_connection" in dev
-    assert "hosts: mtproto_prod" in prod
-    assert "serial: 1" in prod
-    assert "any_errors_fatal: true" in prod
-    assert "role: ssh_hardening" in prod
-    assert "gather_facts: false" in prod
-    assert "ansible.builtin.wait_for_connection" in prod
+    assert "hosts: mtproto_servers" in playbook
+    assert "serial: 1" in playbook
+    assert "any_errors_fatal: true" in playbook
+    assert "role: ssh_hardening" in playbook
+    assert "role: mtproto_deploy" in playbook
+    assert playbook.index("role: ssh_hardening") < playbook.index(
+        "role: mtproto_deploy"
+    )

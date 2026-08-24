@@ -1,1 +1,1 @@
-from .users import router
+from .users import router as router

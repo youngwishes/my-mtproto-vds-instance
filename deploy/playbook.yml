@@ -1,0 +1,9 @@
+---
+- name: Deploy MTProto VDS instances
+  hosts: mtproto_servers
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: ssh_hardening
+    - role: mtproto_deploy

@@ -12,7 +12,7 @@ uv sync
 uv run uvicorn src.app:app --host 0.0.0.0 --port 8080
 
 # Docker
-docker-compose up --build
+docker compose up --build
 ```
 
 ## API
