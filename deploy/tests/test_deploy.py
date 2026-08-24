@@ -116,6 +116,7 @@ def test_syn_limiter_check_accepts_version_3425_dynamic_chain_name() -> None:
     tasks = (ROOT / "roles" / "mtproto_deploy" / "tasks" / "main.yml").read_text()
 
     assert "TMT_SYN_[0-9a-f]{12}" in tasks
+    assert "regex_search('TMT_SYN_[0-9a-f]{12}')) is not none" in tasks
     assert "'TELEMT_SYNLIMIT' in" not in tasks
 
 
@@ -131,7 +132,16 @@ def test_first_binary_migration_is_documented_as_vds4_only() -> None:
 def test_installed_telemt_version_check_is_exact() -> None:
     tasks = (ROOT / "roles" / "mtproto_deploy" / "tasks" / "main.yml").read_text()
 
-    assert 'telemt_version_output.stdout | trim != "telemt {{ telemt_version }}"' in tasks
+    assert 'telemt_version_output.stdout | trim != ("telemt " ~ telemt_version)' in tasks
+    assert "telemt {{ telemt_version }}" not in tasks
+
+
+def test_architecture_selection_uses_non_deprecated_ansible_facts() -> None:
+    tasks = (ROOT / "roles" / "mtproto_deploy" / "tasks" / "main.yml").read_text()
+
+    assert 'ansible_facts["architecture"] in telemt_release_arches' in tasks
+    assert 'telemt_release_arches[ansible_facts["architecture"]]' in tasks
+    assert "ansible_architecture" not in tasks
 
 
 def test_systemd_unit_grants_only_required_network_capabilities() -> None:

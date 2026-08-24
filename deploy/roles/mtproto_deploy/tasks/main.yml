@@ -70,12 +70,14 @@
 - name: Validate Telemt release architecture
   ansible.builtin.assert:
     that:
-      - ansible_architecture in telemt_release_arches
-    fail_msg: "Unsupported Telemt architecture: {{ ansible_architecture }}"
+      - ansible_facts["architecture"] in telemt_release_arches
+    fail_msg: >-
+      Unsupported Telemt architecture: {{ ansible_facts["architecture"] }}
 
 - name: Select Telemt release architecture
   ansible.builtin.set_fact:
-    telemt_release_arch: "{{ telemt_release_arches[ansible_architecture] }}"
+    telemt_release_arch: >-
+      {{ telemt_release_arches[ansible_facts["architecture"]] }}
 
 - name: Create Telemt download directory
   ansible.builtin.file:
@@ -132,7 +134,7 @@
   changed_when: false
   failed_when: >-
     telemt_version_output.rc != 0 or
-    telemt_version_output.stdout | trim != "telemt {{ telemt_version }}"
+    telemt_version_output.stdout | trim != ("telemt " ~ telemt_version)
 
 - name: Create Telemt system group
   ansible.builtin.group:
@@ -276,8 +278,8 @@
   retries: 6
   delay: 5
   until: >-
-    telemt_iptables_rules.stdout
-    | regex_search('TMT_SYN_[0-9a-f]{12}')
+    (telemt_iptables_rules.stdout
+    | regex_search('TMT_SYN_[0-9a-f]{12}')) is not none
 
 - name: Probe a missing user directly through Telemt
   ansible.builtin.uri:
