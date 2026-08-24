@@ -9,14 +9,20 @@ services:
       cp /etc/telemt/telemt.example.toml /etc/telemt/telemt.toml'
 
   telemt:
-    image: ghcr.io/telemt/telemt:latest
+    image: telemt-netfilter:3.4.25
+    build:
+      context: https://github.com/telemt/telemt.git#3.4.25
+      target: prod-netfilter
+      args:
+        TELEMT_REPOSITORY: telemt/telemt
+        TELEMT_VERSION: 3.4.25
     container_name: telemt
     restart: unless-stopped
     user: "root"
     working_dir: /run/telemt
     environment:
       RUST_LOG: "info"
-    command: /usr/local/bin/telemt /etc/telemt/telemt.toml
+    command: ["/etc/telemt/telemt.toml"]
     volumes:
       - ./telemt:/etc/telemt:rw
     security_opt:
@@ -28,6 +34,7 @@ services:
       - ALL
     cap_add:
       - NET_BIND_SERVICE
+      - NET_ADMIN
     tmpfs:
       - /run/telemt:rw,mode=1777,size=4m
     deploy:
@@ -59,6 +66,7 @@ services:
       - "8080:8080"
     environment:
       PORT: "8080"
+      TELEMT_API_ROOT: "http://telemt:9091/v1"
     volumes:
       - ./src:/app/src/
     env_file:

@@ -1,70 +1,4 @@
 services:
-  telemt-setup:
-    image: alpine:3
-    restart: "no"
-    volumes:
-      - ./telemt:/etc/telemt:rw
-    command: >
-      sh -c '[ -f /etc/telemt/telemt.toml ] ||
-      cp /etc/telemt/telemt.example.toml /etc/telemt/telemt.toml'
-
-  telemt:
-    image: telemt-netfilter:3.4.25
-    build:
-      context: https://github.com/telemt/telemt.git#3.4.25
-      target: prod-netfilter
-      args:
-        TELEMT_REPOSITORY: telemt/telemt
-        TELEMT_VERSION: 3.4.25
-    container_name: telemt
-    restart: unless-stopped
-    user: "root"
-    working_dir: /run/telemt
-    environment:
-      RUST_LOG: "info"
-    command: ["/etc/telemt/telemt.toml"]
-    volumes:
-      - ./telemt:/etc/telemt:rw
-    security_opt:
-      - no-new-privileges:true
-    ports:
-      - "443:443/tcp"
-      - "9091:9091"
-    cap_drop:
-      - ALL
-    cap_add:
-      - NET_BIND_SERVICE
-      - NET_ADMIN
-    tmpfs:
-      - /run/telemt:rw,mode=1777,size=4m
-    deploy:
-      resources:
-        limits:
-          cpus: "0.50"
-          memory: 256M
-    depends_on:
-      api:
-        condition: service_started
-      telemt-setup:
-        condition: service_completed_successfully
-    networks:
-      - telemt-network
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536
-    logging:
-      driver: "local"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    healthcheck:
-      test: ["CMD", "/app/telemt", "healthcheck", "/etc/telemt/telemt.toml", "--mode", "liveness"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 10s
-
   api:
     build: .
     container_name: telemt-api
@@ -74,15 +8,11 @@ services:
       - ./src:/app/src/
     env_file:
       - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
-    networks:
-      - telemt-network
     logging:
       driver: "local"
       options:
         max-size: "10m"
         max-file: "3"
-
-networks:
-  telemt-network:
-    driver: bridge

@@ -1,6 +1,6 @@
 # MTProto VDS Instance
 
-FastAPI-сервис для управления пользователями MTProto-прокси на базе [telemt](https://github.com/nickvnlk/telemt). Принимает запросы от Django-бэкенда и транслирует их в telemt API — создание, ротация секретов и удаление ключей.
+FastAPI-сервис для управления пользователями MTProto-прокси на базе [telemt](https://github.com/telemt/telemt). Принимает запросы от Django-бэкенда и транслирует их в telemt API — создание, ротация секретов и удаление ключей.
 
 ## Быстрый старт
 
@@ -11,9 +11,12 @@ uv sync
 # Запуск
 uv run uvicorn src.app:app --host 0.0.0.0 --port 8080
 
-# Docker
-docker compose up --build
+# Локальный стек FastAPI + Telemt 3.4.25
+docker compose -f docker-compose.local.yaml up --build
 ```
+
+В production FastAPI работает в Docker, а Telemt `3.4.25` устанавливается
+Ansible как бинарный systemd-сервис на хосте.
 
 ## API
 

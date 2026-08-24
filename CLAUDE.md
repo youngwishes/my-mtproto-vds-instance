@@ -27,9 +27,11 @@ uv run pytest src/tests/e2e/
 # Lint
 ruff check src/
 
-# Build and run with Docker
-docker compose up --build                                  # продакшн
-docker compose -f docker-compose.local.yaml up --build     # локально
+# Validate production FastAPI Compose
+docker compose config --quiet
+
+# Build and run local FastAPI + Telemt
+docker compose -f docker-compose.local.yaml up --build
 ```
 
 ## Architecture
@@ -65,7 +67,7 @@ deploy/               # Ansible для деплоя на VDS
 └── roles/
     ├── ssh_hardening/
     └── mtproto_deploy/
-telemt/               # Конфиг telemt-процесса (из telemt.example.toml)
+telemt/               # Конфиг systemd-процесса telemt (из telemt.example.toml)
 └── telemt.toml
 src/
 ├── app.py
@@ -89,7 +91,7 @@ src/
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `TELEMT_API_ROOT` | Base URL for telemt HTTP API | `"http://telemt:9091/v1"` |
+| `TELEMT_API_ROOT` | Base URL for telemt HTTP API | `"http://host.docker.internal:9091/v1"` |
 | `E2E_BASE_URL` | Base URL for e2e tests | `"http://127.0.0.1:8080/api"` |
 
 ## Rules
@@ -135,4 +137,5 @@ curl -s -X DELETE http://127.0.0.1:8080/api/users \
 
 - Unit-тесты мокируют исходящий HTTP через `pytest-httpx`.
 - E2e-тесты отправляют реальные запросы на `http://127.0.0.1:8080`, скипаются если контейнеры не подняты.
+- Production запускает Telemt 3.4.25 как systemd-сервис; контейнерный Telemt используется только в `docker-compose.local.yaml` для e2e.
 - Пакетный менеджер — `uv`, lockfile — `uv.lock`.

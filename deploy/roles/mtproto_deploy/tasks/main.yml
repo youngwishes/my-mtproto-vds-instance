@@ -35,9 +35,17 @@
     state: present
     sysctl_file: /etc/sysctl.d/99-swappiness.conf
 
-- name: Install git
+- name: Install deployment and Telemt runtime dependencies
   ansible.builtin.apt:
-    name: git
+    name:
+      - ca-certificates
+      - conntrack
+      - curl
+      - git
+      - iptables
+      - libcap2-bin
+      - nftables
+      - tar
     state: present
     update_cache: true
 
@@ -59,6 +67,145 @@
     version: "{{ mtproto_repo_branch }}"
     force: true
 
+- name: Validate Telemt release architecture
+  ansible.builtin.assert:
+    that:
+      - ansible_architecture in telemt_release_arches
+    fail_msg: "Unsupported Telemt architecture: {{ ansible_architecture }}"
+
+- name: Select Telemt release architecture
+  ansible.builtin.set_fact:
+    telemt_release_arch: "{{ telemt_release_arches[ansible_architecture] }}"
+
+- name: Create Telemt download directory
+  ansible.builtin.file:
+    path: "{{ telemt_download_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download Telemt checksum
+  ansible.builtin.get_url:
+    url: >-
+      {{ telemt_release_base_url }}/{{ telemt_version }}/{{ telemt_archive_name }}.sha256
+    dest: "{{ telemt_download_dir }}/{{ telemt_archive_name }}.sha256"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Download Telemt archive
+  ansible.builtin.get_url:
+    url: >-
+      {{ telemt_release_base_url }}/{{ telemt_version }}/{{ telemt_archive_name }}
+    dest: "{{ telemt_download_dir }}/{{ telemt_archive_name }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Verify downloaded Telemt checksum
+  ansible.builtin.command:
+    cmd: "sha256sum --check {{ telemt_archive_name }}.sha256"
+    chdir: "{{ telemt_download_dir }}"
+  changed_when: false
+
+- name: Extract Telemt binary
+  ansible.builtin.unarchive:
+    src: "{{ telemt_download_dir }}/{{ telemt_archive_name }}"
+    dest: "{{ telemt_download_dir }}"
+    remote_src: true
+
+- name: Install Telemt binary
+  ansible.builtin.copy:
+    src: "{{ telemt_download_dir }}/telemt"
+    dest: "{{ telemt_binary_path }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart Telemt
+
+- name: Verify installed Telemt version
+  ansible.builtin.command:
+    cmd: "{{ telemt_binary_path }} --version"
+  register: telemt_version_output
+  changed_when: false
+  failed_when: >-
+    telemt_version_output.rc != 0 or
+    telemt_version_output.stdout | trim != "telemt {{ telemt_version }}"
+
+- name: Create Telemt system group
+  ansible.builtin.group:
+    name: telemt
+    system: true
+    state: present
+
+- name: Create Telemt system user
+  ansible.builtin.user:
+    name: telemt
+    group: telemt
+    home: "{{ telemt_work_dir }}"
+    create_home: false
+    shell: /usr/sbin/nologin
+    system: true
+    state: present
+
+- name: Create Telemt working directory
+  ansible.builtin.file:
+    path: "{{ telemt_work_dir }}"
+    state: directory
+    owner: telemt
+    group: telemt
+    mode: "0750"
+
+- name: Ensure Telemt config directory is writable by Telemt
+  ansible.builtin.file:
+    path: "{{ mtproto_deploy_dir }}/telemt"
+    state: directory
+    owner: telemt
+    group: telemt
+    mode: "0750"
+
+- name: Create Telemt config from example on clean install
+  ansible.builtin.copy:
+    src: "{{ mtproto_deploy_dir }}/telemt/telemt.example.toml"
+    dest: "{{ telemt_config_path }}"
+    remote_src: true
+    force: false
+    owner: telemt
+    group: telemt
+    mode: "0640"
+
+- name: Check Telemt config before cutover
+  ansible.builtin.stat:
+    path: "{{ telemt_config_path }}"
+    checksum_algorithm: sha256
+  register: telemt_config_before_cutover
+
+- name: Require a readable Telemt config
+  ansible.builtin.assert:
+    that:
+      - telemt_config_before_cutover.stat.exists
+      - telemt_config_before_cutover.stat.isreg
+      - telemt_config_before_cutover.stat.readable
+
+- name: Allow Telemt API to update its config atomically
+  ansible.builtin.file:
+    path: "{{ telemt_config_path }}"
+    state: file
+    owner: telemt
+    group: telemt
+    mode: "0640"
+
+- name: Install Telemt systemd unit
+  ansible.builtin.template:
+    src: telemt.service.j2
+    dest: "/etc/systemd/system/{{ telemt_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Telemt
+
 - name: Create .env from example (skip if already exists)
   ansible.builtin.copy:
     src: "{{ mtproto_deploy_dir }}/.env.example"
@@ -66,13 +213,111 @@
     remote_src: true
     force: false
 
-- name: Stop existing containers
+- name: Route FastAPI to Telemt on the Docker host
+  ansible.builtin.lineinfile:
+    path: "{{ mtproto_deploy_dir }}/.env"
+    regexp: '^TELEMT_API_ROOT='
+    line: "TELEMT_API_ROOT={{ telemt_api_root }}"
+    create: false
+
+- name: Check for legacy Telemt container
   ansible.builtin.command:
-    cmd: docker compose down --remove-orphans
-    chdir: "{{ mtproto_deploy_dir }}"
+    cmd: docker container inspect telemt
+  register: legacy_telemt_container
+  changed_when: false
   failed_when: false
 
-- name: Start containers
+- name: Stop legacy Telemt container
   ansible.builtin.command:
-    cmd: docker compose up -d --build
+    cmd: docker stop --time 30 telemt
+  when: legacy_telemt_container.rc == 0
+
+- name: Remove legacy Telemt container
+  ansible.builtin.command:
+    cmd: docker rm telemt
+  when: legacy_telemt_container.rc == 0
+
+- name: Refresh Telemt config checksum after stopping the container
+  ansible.builtin.stat:
+    path: "{{ telemt_config_path }}"
+    checksum_algorithm: sha256
+  register: telemt_config_stopped
+
+- name: Record the stopped Telemt config checksum
+  ansible.builtin.set_fact:
+    telemt_config_checksum: "{{ telemt_config_stopped.stat.checksum }}"
+
+- name: Apply pending Telemt restart
+  ansible.builtin.meta: flush_handlers
+
+- name: Start Telemt systemd service
+  ansible.builtin.systemd_service:
+    name: "{{ telemt_service_name }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Wait for Telemt liveness
+  ansible.builtin.command:
+    cmd: >-
+      {{ telemt_binary_path }} healthcheck {{ telemt_config_path }}
+      --mode liveness
+  register: telemt_liveness
+  changed_when: false
+  retries: 6
+  delay: 5
+  until: telemt_liveness.rc == 0
+
+- name: Verify built-in Telemt SYN limiter rules
+  ansible.builtin.command:
+    cmd: iptables-save
+  register: telemt_iptables_rules
+  changed_when: false
+  retries: 6
+  delay: 5
+  until: >-
+    telemt_iptables_rules.stdout
+    | regex_search('TMT_SYN_[0-9a-f]{12}')
+
+- name: Probe a missing user directly through Telemt
+  ansible.builtin.uri:
+    url: http://127.0.0.1:9091/v1/users/__ansible_connectivity_probe__
+    method: GET
+    status_code: 404
+    return_content: true
+  register: telemt_missing_user
+
+- name: Start FastAPI container
+  ansible.builtin.command:
+    cmd: docker compose up -d --build --remove-orphans api
     chdir: "{{ mtproto_deploy_dir }}"
+
+- name: Wait for FastAPI port
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 8080
+    delay: 1
+    timeout: 60
+
+- name: Verify FastAPI can reach host Telemt without changing config
+  ansible.builtin.uri:
+    url: http://127.0.0.1:8080/api/users/__ansible_connectivity_probe__
+    method: GET
+    status_code: 404
+    return_content: true
+  register: fastapi_missing_user
+  failed_when: >-
+    fastapi_missing_user.status != 404 or
+    fastapi_missing_user.json.detail != telemt_missing_user.json.error.message
+
+- name: Read Telemt config checksum after verification
+  ansible.builtin.stat:
+    path: "{{ telemt_config_path }}"
+    checksum_algorithm: sha256
+  register: telemt_config_after_cutover
+
+- name: Verify Telemt config checksum is unchanged
+  ansible.builtin.assert:
+    that:
+      - telemt_config_after_cutover.stat.checksum == telemt_config_checksum
+    fail_msg: Telemt config content changed during binary cutover

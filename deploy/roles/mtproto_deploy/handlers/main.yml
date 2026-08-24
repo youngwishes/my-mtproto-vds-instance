@@ -1,0 +1,7 @@
+---
+- name: Restart Telemt
+  ansible.builtin.systemd_service:
+    name: "{{ telemt_service_name }}"
+    state: restarted
+    enabled: true
+    daemon_reload: true

@@ -2,7 +2,7 @@
 
 ## Что это
 
-[Telemt](https://github.com/nickvnlk/telemt) — высокопроизводительный MTProto-прокси сервер, написанный на Rust. Позволяет пользователям подключаться к Telegram через прокси-ссылки вида `tg://proxy?...`.
+[Telemt](https://github.com/telemt/telemt) — высокопроизводительный MTProto-прокси сервер, написанный на Rust. Позволяет пользователям подключаться к Telegram через прокси-ссылки вида `tg://proxy?...`.
 
 ## Ключевые возможности
 
@@ -12,11 +12,17 @@
 
 ## Роль в нашей системе
 
-Telemt — конечный исполнитель. Этот FastAPI-сервис выступает прослойкой между Django-бэкендом и telemt API. Оба работают на одном VDS в Docker-контейнерах в общей сети.
+Telemt — конечный исполнитель. Этот FastAPI-сервис выступает прослойкой между
+Django-бэкендом и telemt API. FastAPI работает в Docker, Telemt `3.4.25` — как
+бинарный systemd-сервис на том же VDS.
 
 ```
 FastAPI (порт 8080) ──HTTP──► telemt API (порт 9091) ──► telemt proxy (порт 443)
 ```
+
+В production FastAPI обращается к хосту через
+`http://host.docker.internal:9091/v1`. Локальный Compose использует внутреннее
+имя `http://telemt:9091/v1`.
 
 ## API
 
