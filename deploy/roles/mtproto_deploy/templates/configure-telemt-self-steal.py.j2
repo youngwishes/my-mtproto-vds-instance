@@ -11,13 +11,15 @@ from pathlib import Path
 
 TARGET_LINES = (
     'tls_domain = {{ mtproto_domain | to_json }}',
-    'tls_domains = {{ telemt_tls_domains | to_json }}',
     'unknown_sni_action = "mask"',
     'mask_host = "127.0.0.1"',
     'mask_port = {{ caddy_self_steal_port }}',
     'tls_emulation = false',
 )
-TARGET_KEYS = {line.split("=", 1)[0].strip() for line in TARGET_LINES}
+TARGET_KEYS = {
+    *(line.split("=", 1)[0].strip() for line in TARGET_LINES),
+    "tls_domains",
+}
 KEY_PATTERN = re.compile(r"^\s*([A-Za-z0-9_]+)\s*=")
 
 

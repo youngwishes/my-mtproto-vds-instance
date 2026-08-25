@@ -69,8 +69,8 @@ telemt.service :9091 ──► MTProto :443 ── fallback ──► Caddy 127.
 ```
 
 Caddy также слушает публичный порт `80` для ACME HTTP challenge. Публичный
-порт `443` принадлежит только Telemt. Для маскировки используются
-`mtprotokeys.com`, `beatvault.ru` и собственный домен текущего сервера.
+порт `443` принадлежит только Telemt. Для маскировки используется только
+собственный домен текущего сервера.
 
 Docker Compose добавляет `host.docker.internal` через `host-gateway`. Для
 локальных e2e-тестов отдельный `docker-compose.local.yaml` по-прежнему запускает

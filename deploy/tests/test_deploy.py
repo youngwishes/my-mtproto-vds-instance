@@ -374,10 +374,6 @@ application = "unchanged-secret"
   vars:
     mtproto_domain: fast.mtprotokeys.com
     caddy_self_steal_port: 8443
-    telemt_tls_domains:
-      - mtprotokeys.com
-      - beatvault.ru
-      - fast.mtprotokeys.com
   tasks:
     - name: Render migration script
       ansible.builtin.template:
@@ -410,13 +406,9 @@ application = "unchanged-secret"
     assert second_run.stdout.strip() == "unchanged"
     assert config_path.read_text() == first_result
     config = tomllib.loads(first_result)
+    assert "tls_domains" not in config["censorship"]
     assert config["censorship"] == {
         "tls_domain": "fast.mtprotokeys.com",
-        "tls_domains": [
-            "mtprotokeys.com",
-            "beatvault.ru",
-            "fast.mtprotokeys.com",
-        ],
         "unknown_sni_action": "mask",
         "mask": True,
         "mask_host": "127.0.0.1",

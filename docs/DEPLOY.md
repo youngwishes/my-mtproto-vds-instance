@@ -80,7 +80,6 @@ Telemt работает от системного пользователя `tele
 
 ```toml
 tls_domain = "<собственный домен сервера>"
-tls_domains = ["mtprotokeys.com", "beatvault.ru", "<собственный домен сервера>"]
 unknown_sni_action = "mask"
 mask_host = "127.0.0.1"
 mask_port = 8443
