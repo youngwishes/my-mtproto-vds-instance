@@ -9,31 +9,34 @@ import tempfile
 from pathlib import Path
 
 
-TARGET_LINES = (
+SERVER_TARGET_LINES = (
+    'client_mss = {{ telemt_client_mss | to_json }}',
+    'client_mss_bulk = {{ telemt_client_mss_bulk | to_json }}',
+)
+CENSORSHIP_TARGET_LINES = (
     'tls_domain = {{ mtproto_domain | to_json }}',
     'unknown_sni_action = "mask"',
     'mask_host = "127.0.0.1"',
     'mask_port = {{ caddy_self_steal_port }}',
     'tls_emulation = false',
 )
-TARGET_KEYS = {
-    *(line.split("=", 1)[0].strip() for line in TARGET_LINES),
-    "tls_domains",
-}
 KEY_PATTERN = re.compile(r"^\s*([A-Za-z0-9_]+)\s*=")
 
 
-def configure(config_path: Path) -> bool:
-    original = config_path.read_text()
-    lines = original.splitlines(keepends=True)
+def configure_section(
+    lines: list[str],
+    section: str,
+    target_lines: tuple[str, ...],
+    removed_keys: set[str] | None = None,
+) -> list[str]:
     try:
         section_start = next(
             index
             for index, line in enumerate(lines)
-            if line.strip() == "[censorship]"
+            if line.strip() == f"[{section}]"
         )
     except StopIteration as error:
-        raise SystemExit("missing [censorship] section") from error
+        raise SystemExit(f"missing [{section}] section") from error
 
     section_end = next(
         (
@@ -43,18 +46,38 @@ def configure(config_path: Path) -> bool:
         ),
         len(lines),
     )
+    target_keys = {
+        *(line.split("=", 1)[0].strip() for line in target_lines),
+        *(removed_keys or set()),
+    }
     retained = []
     for line in lines[section_start + 1 : section_end]:
         match = KEY_PATTERN.match(line)
-        if match is None or match.group(1) not in TARGET_KEYS:
+        if match is None or match.group(1) not in target_keys:
             retained.append(line)
 
-    replacement = [f"{line}\n" for line in TARGET_LINES]
-    updated_lines = (
+    replacement = [f"{line}\n" for line in target_lines]
+    return (
         lines[: section_start + 1]
         + replacement
         + retained
         + lines[section_end:]
+    )
+
+
+def configure(config_path: Path) -> bool:
+    original = config_path.read_text()
+    updated_lines = original.splitlines(keepends=True)
+    updated_lines = configure_section(
+        updated_lines,
+        "server",
+        SERVER_TARGET_LINES,
+    )
+    updated_lines = configure_section(
+        updated_lines,
+        "censorship",
+        CENSORSHIP_TARGET_LINES,
+        {"tls_domains"},
     )
     updated = "".join(updated_lines)
     if updated == original:

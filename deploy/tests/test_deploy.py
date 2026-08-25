@@ -131,7 +131,7 @@ def test_local_compose_runs_pinned_telemt_without_net_admin() -> None:
     )
 
 
-def test_example_config_disables_syn_limiter_for_every_listener() -> None:
+def test_example_config_enables_required_client_network_controls() -> None:
     config = tomllib.loads(
         (PROJECT_ROOT / "telemt" / "telemt.example.toml").read_text()
     )
@@ -141,6 +141,8 @@ def test_example_config_disables_syn_limiter_for_every_listener() -> None:
         listener.get("synlimit") is False
         for listener in config["server"]["listeners"]
     )
+    assert config["server"]["client_mss"] == "tspu"
+    assert config["server"]["client_mss_bulk"] == "1400"
 
 
 def test_local_migration_disables_existing_config_without_other_changes(
@@ -350,6 +352,11 @@ def test_self_steal_migration_preserves_unrelated_telemt_config(
         / "configure-telemt-self-steal.py.j2"
     )
     source = """
+[server]
+port = 443
+client_mss = "2in8"
+client_mss_bulk = "1200"
+
 [censorship]
 tls_domain = "old.example"
 tls_domains = ["another.example"]
@@ -374,6 +381,8 @@ application = "unchanged-secret"
   vars:
     mtproto_domain: fast.mtprotokeys.com
     caddy_self_steal_port: 8443
+    telemt_client_mss: tspu
+    telemt_client_mss_bulk: "1400"
   tasks:
     - name: Render migration script
       ansible.builtin.template:
@@ -406,6 +415,11 @@ application = "unchanged-secret"
     assert second_run.stdout.strip() == "unchanged"
     assert config_path.read_text() == first_result
     config = tomllib.loads(first_result)
+    assert config["server"] == {
+        "port": 443,
+        "client_mss": "tspu",
+        "client_mss_bulk": "1400",
+    }
     assert "tls_domains" not in config["censorship"]
     assert config["censorship"] == {
         "tls_domain": "fast.mtprotokeys.com",

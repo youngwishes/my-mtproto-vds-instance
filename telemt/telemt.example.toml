@@ -16,6 +16,8 @@ prefer = 4
 
 [server]
 port = 443
+client_mss = "tspu"
+client_mss_bulk = "1400"
 
 [server.api]
 enabled = true

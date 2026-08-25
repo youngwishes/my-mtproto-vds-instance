@@ -16,6 +16,8 @@ telemt_release_arches:
   aarch64: aarch64
 telemt_archive_name: "telemt-{{ telemt_release_arch }}-linux-musl.tar.gz"
 telemt_self_steal_script_path: /usr/local/sbin/configure-telemt-self-steal.py
+telemt_client_mss: tspu
+telemt_client_mss_bulk: "1400"
 caddy_self_steal_port: 8443
 caddy_apt_key_url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
 caddy_apt_key_source_path: /usr/share/keyrings/caddy-stable-archive-keyring.asc
