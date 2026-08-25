@@ -1,0 +1,25 @@
+{
+	admin off
+	auto_https disable_redirects
+	https_port {{ caddy_self_steal_port }}
+}
+
+http://{{ mtproto_domain }} {
+	bind 0.0.0.0
+	respond "Service is available." 200
+}
+
+{{ mtproto_domain }} {
+	bind 127.0.0.1
+	tls {
+		issuer acme {
+			disable_tlsalpn_challenge
+		}
+	}
+
+	header {
+		Cache-Control "no-store"
+		X-Content-Type-Options "nosniff"
+	}
+	respond "Service is available." 200
+}

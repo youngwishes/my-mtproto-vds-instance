@@ -1,8 +1,8 @@
 [Unit]
 Description=Telemt MTProto proxy
-Requires={{ mtproto_zapret2_service_name | default('mtpr-zapret2') }}.service
-After=network-online.target {{ mtproto_zapret2_service_name | default('mtpr-zapret2') }}.service{{ ' caddy.service' if telemt_caddy_dependency | default(false) else '' }}
-Wants=network-online.target{{ ' caddy.service' if telemt_caddy_dependency | default(false) else '' }}
+Requires=caddy.service
+After=network-online.target caddy.service
+Wants=network-online.target
 
 [Service]
 Type=simple

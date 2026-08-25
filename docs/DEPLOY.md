@@ -9,8 +9,8 @@ ansible-playbook -i deploy/inventory.ini deploy/playbook.yml
 
 Playbook обрабатывает серверы по одному и останавливается при первой ошибке. На
 каждом сервере он отключает парольную SSH-аутентификацию, устанавливает
-зависимости, обновляет `/opt/mtproto` из ветки `main`, устанавливает Telemt как
-systemd-сервис и запускает FastAPI через Docker Compose.
+зависимости, обновляет `/opt/mtproto` из ветки `main`, устанавливает Caddy и
+Telemt как systemd-сервисы и запускает FastAPI через Docker Compose.
 
 Для точечного повторного деплоя можно ограничить запуск одним сервером:
 
@@ -24,7 +24,10 @@ ansible-playbook -i deploy/inventory.ini deploy/playbook.yml --limit vds4
 актуальные IP-адреса и путь к SSH-ключу. Настоящий inventory исключён из Git.
 
 Все серверы находятся в одной группе `mtproto_servers`; дополнительных
-окружений и групп нет.
+окружений и групп нет. Собственные домены серверов задаются переменной
+`mtproto_domain` в `deploy/host_vars/vdsN.yml`. Перед изменением хоста убедитесь,
+что A-запись домена совпадает с `ansible_host`: playbook проверяет это до
+установки Caddy.
 
 Проверить соединение:
 
@@ -48,7 +51,13 @@ git diff --check
 Роль деплоя получает код из удалённой ветки `main`. Поэтому локальные изменения
 нужно закоммитить и отправить в remote до запуска playbook.
 
-## Telemt и Zapret2 V4
+## Caddy и Telemt
+
+Роль устанавливает Caddy из официального stable-репозитория и управляет его
+конфигурацией. Caddy принимает HTTP на публичном порту `80` для ACME challenge,
+а HTTPS слушает только на `127.0.0.1:8443`. Telemt безусловно зависит от
+`caddy.service` через systemd и продолжает единолично занимать публичный порт
+`443`.
 
 Роль скачивает официальный архив
 `telemt-<arch>-linux-musl.tar.gz` версии `3.4.25` вместе с `.sha256`, проверяет
@@ -66,26 +75,17 @@ Telemt работает от системного пользователя `tele
 нет `client_mss`. Владелец и права поддерживаются как `telemt:telemt` и `0640`,
 чтобы HTTP API мог атомарно обновлять пользователей.
 
-Роль скачивает официальный архив Zapret2 `v1.0.3` и проверяет SHA-256
-`5220d9253b1fc858c7a1e0a6340f2d87f2e30ed24f71c5cee19dfc458734e6a5`.
-`nfqws2` и upstream Lua-библиотеки устанавливаются в `/opt/zapret2`, MTProto-
-конфигурация — в `/etc/zapret2/mtproto.conf`. Сервис `mtpr-zapret2.service`
-создаёт отдельную таблицу `ip MTProto` и направляет входящий и исходящий TCP-
-трафик порта 443 в NFQUEUE 200 с флагом `bypass`.
+Миграция точечно переводит секцию `[censorship]` на self-steal, сохраняя
+пользователей и остальные параметры:
 
-При первой установке роль проверяет, что таблица `ip MTProto` и очередь 200 не
-заняты сторонним сервисом. При конфликте playbook останавливается до установки
-новых правил. При последующих запусках Zapret2 и Telemt перезапускаются только
-при изменении их файлов. Systemd readiness probe требует регистрацию NFQUEUE и
-оба правила для входящего и исходящего трафика. Параметр inventory
-`telemt_caddy_dependency=true` добавляет Caddy в `After`/`Wants` Telemt, но не
-устанавливает и не настраивает сам Caddy.
-
-Lua-стратегия является неофициальной Ansible-адаптацией V4 из
-[MTproxy-reanimation](https://github.com/Mekotofeuka/MTproxy-reanimation).
-Условия исходной лицензии и описание изменений сохранены в
-[`docs/third-party/MTPROTO_FIX_By_MEKO-LICENSE.txt`](third-party/MTPROTO_FIX_By_MEKO-LICENSE.txt)
-и [`docs/third-party/MTPROTO_FIX_By_MEKO-NOTICE.md`](third-party/MTPROTO_FIX_By_MEKO-NOTICE.md).
+```toml
+tls_domain = "<собственный домен сервера>"
+tls_domains = ["mtprotokeys.com", "beatvault.ru", "<собственный домен сервера>"]
+unknown_sni_action = "mask"
+mask_host = "127.0.0.1"
+mask_port = 8443
+tls_emulation = false
+```
 
 `.env` обновляется точечно:
 
@@ -100,14 +100,12 @@ TELEMT_API_ROOT=http://host.docker.internal:9091/v1
 
 ```bash
 systemctl is-active telemt
-systemctl is-active mtpr-zapret2
+systemctl is-active caddy
 /usr/local/bin/telemt --version
-/opt/zapret2/bin/nfqws2 --version
 /usr/local/bin/telemt healthcheck \
   /opt/mtproto/telemt/telemt.toml --mode liveness
-/usr/sbin/nft list table ip MTProto
-awk '$1 == 200 { found=1 } END { exit !found }' \
-  /proc/net/netfilter/nfnetlink_queue
+curl --resolve "${MTPROTO_DOMAIN}:443:127.0.0.1" \
+  "https://${MTPROTO_DOMAIN}/"
 docker compose ps
 ```
 

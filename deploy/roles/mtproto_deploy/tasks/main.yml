@@ -50,8 +50,6 @@
       - ca-certificates
       - curl
       - git
-      - iptables
-      - nftables
       - tar
     state: present
     update_cache: true
@@ -73,6 +71,9 @@
     dest: "{{ mtproto_deploy_dir }}"
     version: "{{ mtproto_repo_branch }}"
     force: true
+
+- name: Install mandatory Caddy self-steal frontend
+  ansible.builtin.import_tasks: install_caddy.yml
 
 - name: Validate Telemt release architecture
   ansible.builtin.assert:
@@ -193,6 +194,23 @@
     group: telemt
     mode: "0640"
 
+- name: Install Telemt self-steal migration script
+  ansible.builtin.template:
+    src: configure-telemt-self-steal.py.j2
+    dest: "{{ telemt_self_steal_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure Telemt self-steal masking
+  ansible.builtin.command:
+    argv:
+      - "{{ telemt_self_steal_script_path }}"
+      - "{{ telemt_config_path }}"
+  register: telemt_self_steal_migration
+  changed_when: telemt_self_steal_migration.stdout | trim == "changed"
+  notify: Restart Telemt
+
 - name: Install Telemt systemd unit
   ansible.builtin.template:
     src: telemt.service.j2
@@ -216,21 +234,8 @@
     line: "TELEMT_API_ROOT={{ telemt_api_root }}"
     create: false
 
-- name: Prepare pinned MTProto Zapret2 release
-  ansible.builtin.import_tasks: prepare_zapret2.yml
-
-- name: Install MTProto Zapret2 V4
-  ansible.builtin.import_tasks: install_zapret2.yml
-
 - name: Apply pending service restarts
   ansible.builtin.meta: flush_handlers
-
-- name: Ensure MTProto Zapret2 service is running
-  ansible.builtin.systemd_service:
-    name: "{{ mtproto_zapret2_service_name }}.service"
-    state: started
-    enabled: true
-    daemon_reload: true
 
 - name: Ensure Telemt systemd service is running
   ansible.builtin.systemd_service:
@@ -249,6 +254,24 @@
   retries: 6
   delay: 5
   until: telemt_liveness.rc == 0
+
+- name: Verify Telemt self-steal fallback through Caddy
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --fail
+      - --silent
+      - --show-error
+      - --noproxy
+      - "*"
+      - --resolve
+      - "{{ mtproto_domain }}:443:127.0.0.1"
+      - "https://{{ mtproto_domain }}/"
+  register: telemt_self_steal_probe
+  changed_when: false
+  retries: 6
+  delay: 2
+  until: telemt_self_steal_probe.rc == 0
 
 - name: Probe a missing user directly through Telemt
   ansible.builtin.uri:

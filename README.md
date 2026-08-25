@@ -16,8 +16,8 @@ docker compose -f docker-compose.local.yaml up --build
 ```
 
 В production FastAPI работает в Docker, а Telemt `3.4.25` устанавливается
-Ansible как бинарный systemd-сервис на хосте. Отдельный сервис Zapret2 V4
-обрабатывает входящий и исходящий MTProto-трафик через NFQUEUE.
+Ansible как бинарный systemd-сервис на хосте. Обязательный Caddy предоставляет
+локальный HTTPS endpoint для self-steal-маскировки Telemt.
 
 ## API
 

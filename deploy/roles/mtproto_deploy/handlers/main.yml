@@ -1,7 +1,7 @@
 ---
-- name: Restart MTProto Zapret2
+- name: Restart Caddy
   ansible.builtin.systemd_service:
-    name: "{{ mtproto_zapret2_service_name }}.service"
+    name: caddy.service
     state: restarted
     enabled: true
     daemon_reload: true

@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import os
+import re
+import stat
+import sys
+import tempfile
+from pathlib import Path
+
+
+TARGET_LINES = (
+    'tls_domain = {{ mtproto_domain | to_json }}',
+    'tls_domains = {{ telemt_tls_domains | to_json }}',
+    'unknown_sni_action = "mask"',
+    'mask_host = "127.0.0.1"',
+    'mask_port = {{ caddy_self_steal_port }}',
+    'tls_emulation = false',
+)
+TARGET_KEYS = {line.split("=", 1)[0].strip() for line in TARGET_LINES}
+KEY_PATTERN = re.compile(r"^\s*([A-Za-z0-9_]+)\s*=")
+
+
+def configure(config_path: Path) -> bool:
+    original = config_path.read_text()
+    lines = original.splitlines(keepends=True)
+    try:
+        section_start = next(
+            index
+            for index, line in enumerate(lines)
+            if line.strip() == "[censorship]"
+        )
+    except StopIteration as error:
+        raise SystemExit("missing [censorship] section") from error
+
+    section_end = next(
+        (
+            index
+            for index in range(section_start + 1, len(lines))
+            if lines[index].lstrip().startswith("[")
+        ),
+        len(lines),
+    )
+    retained = []
+    for line in lines[section_start + 1 : section_end]:
+        match = KEY_PATTERN.match(line)
+        if match is None or match.group(1) not in TARGET_KEYS:
+            retained.append(line)
+
+    replacement = [f"{line}\n" for line in TARGET_LINES]
+    updated_lines = (
+        lines[: section_start + 1]
+        + replacement
+        + retained
+        + lines[section_end:]
+    )
+    updated = "".join(updated_lines)
+    if updated == original:
+        return False
+
+    metadata = config_path.stat()
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=config_path.parent,
+        prefix=f".{config_path.name}.",
+    )
+    try:
+        with os.fdopen(descriptor, "w") as temporary:
+            temporary.write(updated)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.chmod(temporary_name, stat.S_IMODE(metadata.st_mode))
+        os.chown(temporary_name, metadata.st_uid, metadata.st_gid)
+        os.replace(temporary_name, config_path)
+    finally:
+        if os.path.exists(temporary_name):
+            os.unlink(temporary_name)
+    return True
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        raise SystemExit(f"usage: {sys.argv[0]} CONFIG_PATH")
+    print("changed" if configure(Path(sys.argv[1])) else "unchanged")

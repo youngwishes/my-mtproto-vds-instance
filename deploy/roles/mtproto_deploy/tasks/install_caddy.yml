@@ -1,0 +1,123 @@
+---
+- name: Validate the server domain
+  ansible.builtin.assert:
+    that:
+      - mtproto_domain is defined
+      - mtproto_domain is match('^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$')
+      - caddy_self_steal_port | int >= 1
+      - caddy_self_steal_port | int <= 65535
+    fail_msg: A valid mtproto_domain and Caddy self-steal port are required
+
+- name: Resolve the server domain
+  ansible.builtin.command:
+    argv:
+      - getent
+      - ahostsv4
+      - "{{ mtproto_domain }}"
+  register: mtproto_domain_resolution
+  changed_when: false
+
+- name: Verify the server domain resolves to this host
+  ansible.builtin.assert:
+    that:
+      - ansible_host in mtproto_domain_resolution.stdout.split()
+    fail_msg: >-
+      {{ mtproto_domain }} must resolve to inventory address {{ ansible_host }}
+
+- name: Install Caddy repository dependencies
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - debian-archive-keyring
+      - debian-keyring
+      - gnupg
+    state: present
+    update_cache: true
+
+- name: Download Caddy repository signing key
+  ansible.builtin.get_url:
+    url: "{{ caddy_apt_key_url }}"
+    dest: "{{ caddy_apt_key_source_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: caddy_apt_key_source
+
+- name: Check Caddy repository keyring
+  ansible.builtin.stat:
+    path: "{{ caddy_apt_key_path }}"
+  register: caddy_apt_keyring
+
+- name: Install Caddy repository signing key
+  ansible.builtin.command:
+    argv:
+      - gpg
+      - --batch
+      - --yes
+      - --dearmor
+      - --output
+      - "{{ caddy_apt_key_path }}"
+      - "{{ caddy_apt_key_source_path }}"
+  when: caddy_apt_key_source.changed or not caddy_apt_keyring.stat.exists
+
+- name: Install Caddy stable repository
+  ansible.builtin.get_url:
+    url: "{{ caddy_apt_repository_url }}"
+    dest: "{{ caddy_apt_repository_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install Caddy
+  ansible.builtin.apt:
+    name: caddy
+    state: present
+    update_cache: true
+
+- name: Install Caddy configuration
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: /etc/caddy/Caddyfile
+    owner: root
+    group: caddy
+    mode: "0644"
+  notify: Restart Caddy
+
+- name: Validate Caddy configuration
+  ansible.builtin.command:
+    argv:
+      - caddy
+      - validate
+      - --config
+      - /etc/caddy/Caddyfile
+      - --adapter
+      - caddyfile
+  changed_when: false
+
+- name: Apply pending Caddy restart
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure Caddy service is running
+  ansible.builtin.systemd_service:
+    name: caddy.service
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Verify Caddy self-steal endpoint
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --fail
+      - --silent
+      - --show-error
+      - --noproxy
+      - "*"
+      - --resolve
+      - "{{ mtproto_domain }}:{{ caddy_self_steal_port }}:127.0.0.1"
+      - "https://{{ mtproto_domain }}:{{ caddy_self_steal_port }}/"
+  register: caddy_self_steal_probe
+  changed_when: false
+  retries: 12
+  delay: 5
+  until: caddy_self_steal_probe.rc == 0

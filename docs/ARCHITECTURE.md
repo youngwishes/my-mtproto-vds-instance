@@ -33,8 +33,8 @@ systemd-сервис и предоставляет HTTP API для управл�
 - **httpx** — асинхронный HTTP-клиент для запросов к telemt API
 - **Docker Compose** — запуск FastAPI-контейнера
 - **systemd** — запуск бинарника Telemt 3.4.25 на хосте
-- **Zapret2 / nftables / NFQUEUE** — V4-обработка MTProto-трафика на порту 443
-- **Ansible** — установка и последовательное обновление обоих сервисов
+- **Caddy** — локальный HTTPS endpoint для self-steal-маскировки
+- **Ansible** — установка Caddy и Telemt, последовательное обновление серверов
 
 ## Структура проекта
 
@@ -65,13 +65,17 @@ FastAPI деплоится в Docker, а Telemt запускается непо�
 FastAPI container :8080
     │ http://host.docker.internal:9091/v1
     ▼
-telemt.service :9091 ──► MTProto :443 ◄──► nftables queue 200 ◄──► nfqws2
+telemt.service :9091 ──► MTProto :443 ── fallback ──► Caddy 127.0.0.1:8443
 ```
+
+Caddy также слушает публичный порт `80` для ACME HTTP challenge. Публичный
+порт `443` принадлежит только Telemt. Для маскировки используются
+`mtprotokeys.com`, `beatvault.ru` и собственный домен текущего сервера.
 
 Docker Compose добавляет `host.docker.internal` через `host-gateway`. Для
 локальных e2e-тестов отдельный `docker-compose.local.yaml` по-прежнему запускает
 оба сервиса в контейнерах. Контейнер Telemt использует обычный production target
 без netfilter-пакетов и без `NET_ADMIN`; встроенный SYN-limiter отключён тем же
-example-конфигом, что используется при чистой установке на сервер. В production
-его заменяет host-level Zapret2 V4. Одноразовый setup-контейнер также точечно
-мигрирует уже существующий локальный `telemt.toml`.
+example-конфигом, что используется при чистой установке на сервер. Одноразовый
+setup-контейнер также точечно мигрирует уже существующий локальный
+`telemt.toml`.
