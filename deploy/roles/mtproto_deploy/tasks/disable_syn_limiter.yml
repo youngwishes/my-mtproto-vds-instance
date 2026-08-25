@@ -4,3 +4,9 @@
     path: "{{ telemt_config_path }}"
     regexp: '^(\s*synlimit\s*=\s*)(?:"(?:iptables|nftables)"|''(?:iptables|nftables)'')(\s*(?:#.*)?)$'
     replace: '\1false\2'
+
+- name: Remove Telemt client MSS override
+  ansible.builtin.lineinfile:
+    path: "{{ telemt_config_path }}"
+    regexp: '^\s*client_mss\s*=.*$'
+    state: absent

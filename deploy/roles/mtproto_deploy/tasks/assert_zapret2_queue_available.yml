@@ -1,0 +1,12 @@
+---
+- name: Verify Zapret2 NFQUEUE is available
+  ansible.builtin.assert:
+    that:
+      - >-
+        (mtproto_zapret2_queue_registry.stdout
+        | regex_search('(?m)^\\s*' ~ (mtproto_zapret2_queue_num | string) ~ '\\s+')) is none
+      - >-
+        (mtproto_zapret2_queue_rules.stdout
+        | regex_search('queue(?: flags bypass)?(?: num| to) ' ~ (mtproto_zapret2_queue_num | string) ~ '(?:\\D|$)')) is none
+    fail_msg: >-
+      Zapret2 NFQUEUE {{ mtproto_zapret2_queue_num }} is already in use

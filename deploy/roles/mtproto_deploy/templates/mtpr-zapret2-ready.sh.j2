@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+NFT={{ mtproto_zapret2_nft_binary }}
+TABLE={{ mtproto_zapret2_table }}
+PORT={{ mtproto_zapret2_port }}
+QNUM={{ mtproto_zapret2_queue_num }}
+i=0
+while [ "$i" -lt 50 ]; do
+  if awk -v q="$QNUM" '$1 == q { found=1 } END { exit !found }' /proc/net/netfilter/nfnetlink_queue 2>/dev/null \
+    && "$NFT" list table ip "$TABLE" 2>/dev/null | grep -E "tcp (sport|dport) $PORT.*queue.*(num )?$QNUM([[:space:]]|$)" >/dev/null; then
+    exit 0
+  fi
+  i=$((i + 1))
+  sleep 0.1
+done
+
+"$NFT" delete table ip "$TABLE" 2>/dev/null || true
+echo "Zapret2 NFQUEUE $QNUM did not become ready" >&2
+exit 1

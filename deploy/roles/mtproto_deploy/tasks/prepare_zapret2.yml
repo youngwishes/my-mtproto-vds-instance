@@ -1,0 +1,50 @@
+---
+- name: Validate MTProto Zapret2 settings
+  ansible.builtin.assert:
+    that:
+      - ansible_facts["architecture"] in mtproto_zapret2_arches
+      - mtproto_zapret2_port | int >= 1
+      - mtproto_zapret2_port | int <= 65535
+      - mtproto_zapret2_queue_num | int >= 0
+      - mtproto_zapret2_queue_num | int <= 65535
+    fail_msg: >-
+      Unsupported Zapret2 architecture or invalid port/NFQUEUE settings
+
+- name: Select Zapret2 release architecture
+  ansible.builtin.set_fact:
+    mtproto_zapret2_release_arch: >-
+      {{ mtproto_zapret2_arches[ansible_facts["architecture"]] }}
+
+- name: Create Zapret2 download directory
+  ansible.builtin.file:
+    path: "{{ mtproto_zapret2_download_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download pinned Zapret2 archive
+  ansible.builtin.get_url:
+    url: "{{ mtproto_zapret2_release_url }}"
+    dest: "{{ mtproto_zapret2_download_dir }}/{{ mtproto_zapret2_archive_name }}"
+    checksum: "sha256:{{ mtproto_zapret2_archive_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Extract pinned Zapret2 archive
+  ansible.builtin.unarchive:
+    src: "{{ mtproto_zapret2_download_dir }}/{{ mtproto_zapret2_archive_name }}"
+    dest: "{{ mtproto_zapret2_download_dir }}"
+    remote_src: true
+
+- name: Verify pinned Zapret2 binary
+  ansible.builtin.command:
+    argv:
+      - "{{ mtproto_zapret2_extract_dir }}/binaries/{{ mtproto_zapret2_release_arch }}/nfqws2"
+      - --version
+  register: mtproto_zapret2_release_version
+  changed_when: false
+  failed_when: >-
+    mtproto_zapret2_release_version.rc != 0 or
+    mtproto_zapret2_version not in mtproto_zapret2_release_version.stdout

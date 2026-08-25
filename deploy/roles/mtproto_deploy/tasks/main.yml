@@ -222,6 +222,9 @@
     line: "TELEMT_API_ROOT={{ telemt_api_root }}"
     create: false
 
+- name: Prepare pinned MTProto Zapret2 release
+  ansible.builtin.import_tasks: prepare_zapret2.yml
+
 - name: Check for legacy Telemt container
   ansible.builtin.command:
     cmd: docker container inspect telemt
@@ -258,6 +261,20 @@
   register: telemt_enabled_syn_limiter
   changed_when: false
   failed_when: telemt_enabled_syn_limiter.rc != 1
+
+- name: Verify Telemt config has no client MSS override
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -Eq
+      - "^[[:space:]]*client_mss[[:space:]]*="
+      - "{{ telemt_config_path }}"
+  register: telemt_client_mss_override
+  changed_when: false
+  failed_when: telemt_client_mss_override.rc != 1
+
+- name: Install MTProto Zapret2 V4
+  ansible.builtin.import_tasks: install_zapret2.yml
 
 - name: Refresh Telemt config checksum after stopping its writers
   ansible.builtin.stat:
@@ -335,9 +352,12 @@
     status_code: 404
     return_content: true
   register: fastapi_missing_user
-  failed_when: >-
-    fastapi_missing_user.status != 404 or
-    fastapi_missing_user.json.detail != telemt_missing_user.json.error.message
+  retries: 6
+  delay: 2
+  until: >-
+    fastapi_missing_user.get('status', -1) == 404 and
+    fastapi_missing_user.get('json', {}).get('detail', '') ==
+    telemt_missing_user.json.error.message
 
 - name: Read Telemt config checksum after verification
   ansible.builtin.stat:
