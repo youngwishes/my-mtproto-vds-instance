@@ -1,71 +1,8 @@
 ---
-- name: Check for legacy MTProto V3 service
-  ansible.builtin.stat:
-    path: /etc/systemd/system/mtproto-syn-fix.service
-  register: mtproto_v3_service
-
-- name: Stop legacy MTProto V3 SYN fix
-  ansible.builtin.systemd_service:
-    name: mtproto-syn-fix.service
-    state: stopped
-    enabled: false
-  when: mtproto_v3_service.stat.exists
-
-- name: Remove legacy MTProto V3 firewall rules
-  ansible.builtin.shell: |
-    set -eu
-    iptables={{ mtproto_zapret2_iptables_binary | quote }}
-    changed=0
-    fingerprint='32 & 0x000FFFFF = 0x0002FFFF && 40 & 0xFF000000 = 0x02000000 && 44 & 0xFFFF0000 = 0x01030000 && 48 & 0xFFFFFF00 = 0x01010800 && 60 & 0xFFFFFFFF = 0x04020000'
-
-    while "$iptables" -t filter -C INPUT -j MTPR_SYNFIX 2>/dev/null; do
-      "$iptables" -t filter -D INPUT -j MTPR_SYNFIX
-      changed=1
-    done
-
-    if "$iptables" -t filter -S MTPR_SYNFIX >/dev/null 2>&1; then
-      "$iptables" -t filter -F MTPR_SYNFIX
-      "$iptables" -t filter -X MTPR_SYNFIX
-      changed=1
-    fi
-
-    while "$iptables" -t mangle -C PREROUTING \
-      -p tcp --dport 443 --syn \
-      -m u32 --u32 "$fingerprint" \
-      -j MARK --set-mark 0x400 \
-      -m comment --comment "mtproto-syn-fix-ios-443" 2>/dev/null; do
-      "$iptables" -t mangle -D PREROUTING \
-        -p tcp --dport 443 --syn \
-        -m u32 --u32 "$fingerprint" \
-        -j MARK --set-mark 0x400 \
-        -m comment --comment "mtproto-syn-fix-ios-443"
-      changed=1
-    done
-
-    printf 'changed=%s\n' "$changed"
-  args:
-    executable: /bin/bash
-  register: mtproto_v3_cleanup
-  changed_when: "'changed=1' in mtproto_v3_cleanup.stdout"
-
-- name: Remove legacy MTProto V3 files
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - /usr/local/sbin/mtproto-syn-fix
-    - /etc/systemd/system/mtproto-syn-fix.service
-
 - name: Check for existing MTProto Zapret2 service
   ansible.builtin.stat:
     path: "/etc/systemd/system/{{ mtproto_zapret2_service_name }}.service"
   register: mtproto_zapret2_existing_service
-
-- name: Stop existing MTProto Zapret2 service
-  ansible.builtin.systemd_service:
-    name: "{{ mtproto_zapret2_service_name }}.service"
-    state: stopped
-  when: mtproto_zapret2_existing_service.stat.exists
 
 - name: Check for an unmanaged Zapret2 nftables table
   ansible.builtin.command:
@@ -82,18 +19,6 @@
       Refusing to delete existing nftables table {{ mtproto_zapret2_table }} without
       the managed {{ mtproto_zapret2_service_name }} service marker
 
-- name: Remove existing managed Zapret2 nftables table
-  ansible.builtin.shell: |
-    set -eu
-    if {{ mtproto_zapret2_nft_binary | quote }} list table ip {{ mtproto_zapret2_table | quote }} >/dev/null 2>&1; then
-      {{ mtproto_zapret2_nft_binary | quote }} delete table ip {{ mtproto_zapret2_table | quote }}
-      printf 'changed=1\n'
-    fi
-  args:
-    executable: /bin/bash
-  register: mtproto_zapret2_table_cleanup
-  changed_when: "'changed=1' in mtproto_zapret2_table_cleanup.stdout"
-
 - name: Read active NFQUEUE registry before Zapret2 cutover
   ansible.builtin.shell: |
     if test -r /proc/net/netfilter/nfnetlink_queue; then
@@ -103,6 +28,7 @@
     executable: /bin/bash
   register: mtproto_zapret2_queue_registry
   changed_when: false
+  when: not mtproto_zapret2_existing_service.stat.exists
 
 - name: Read nftables queue rules before Zapret2 cutover
   ansible.builtin.command:
@@ -112,9 +38,11 @@
       - ruleset
   register: mtproto_zapret2_queue_rules
   changed_when: false
+  when: not mtproto_zapret2_existing_service.stat.exists
 
 - name: Verify Zapret2 NFQUEUE is available
   ansible.builtin.import_tasks: assert_zapret2_queue_available.yml
+  when: not mtproto_zapret2_existing_service.stat.exists
 
 - name: Create Zapret2 runtime directories
   ansible.builtin.file:
@@ -139,6 +67,7 @@
     owner: root
     group: root
     mode: "0755"
+  notify: Restart MTProto Zapret2
 
 - name: Install upstream Zapret2 Lua libraries
   ansible.builtin.copy:
@@ -151,6 +80,7 @@
   loop:
     - zapret-lib.lua
     - zapret-antidpi.lua
+  notify: Restart MTProto Zapret2
 
 - name: Install MTProto Zapret2 Lua strategy
   ansible.builtin.template:
@@ -159,6 +89,7 @@
     owner: root
     group: root
     mode: "0644"
+  notify: Restart MTProto Zapret2
 
 - name: Install MTProto Zapret2 configuration
   ansible.builtin.template:
@@ -167,6 +98,7 @@
     owner: root
     group: root
     mode: "0644"
+  notify: Restart MTProto Zapret2
 
 - name: Install MTProto Zapret2 startup script
   ansible.builtin.template:
@@ -175,6 +107,7 @@
     owner: root
     group: root
     mode: "0755"
+  notify: Restart MTProto Zapret2
 
 - name: Install MTProto Zapret2 readiness probe
   ansible.builtin.template:
@@ -183,6 +116,7 @@
     owner: root
     group: root
     mode: "0755"
+  notify: Restart MTProto Zapret2
 
 - name: Install MTProto Zapret2 service
   ansible.builtin.template:
@@ -191,43 +125,4 @@
     owner: root
     group: root
     mode: "0644"
-
-- name: Start MTProto Zapret2 service
-  ansible.builtin.systemd_service:
-    name: "{{ mtproto_zapret2_service_name }}.service"
-    state: started
-    enabled: true
-    daemon_reload: true
-
-- name: Read MTProto Zapret2 nftables table
-  ansible.builtin.command:
-    argv:
-      - "{{ mtproto_zapret2_nft_binary }}"
-      - list
-      - table
-      - ip
-      - "{{ mtproto_zapret2_table }}"
-  register: mtproto_zapret2_runtime_rules
-  changed_when: false
-
-- name: Read MTProto Zapret2 NFQUEUE registration
-  ansible.builtin.command:
-    argv:
-      - cat
-      - /proc/net/netfilter/nfnetlink_queue
-  register: mtproto_zapret2_runtime_queue
-  changed_when: false
-
-- name: Verify MTProto Zapret2 runtime
-  ansible.builtin.assert:
-    that:
-      - >-
-        ('tcp sport ' ~ (mtproto_zapret2_port | string))
-        in mtproto_zapret2_runtime_rules.stdout
-      - >-
-        ('tcp dport ' ~ (mtproto_zapret2_port | string))
-        in mtproto_zapret2_runtime_rules.stdout
-      - >-
-        (mtproto_zapret2_runtime_queue.stdout
-        | regex_search('(?m)^\\s*' ~ (mtproto_zapret2_queue_num | string) ~ '\\s+')) is not none
-    fail_msg: MTProto Zapret2 did not register the expected nftables/NFQUEUE state
+  notify: Restart MTProto Zapret2

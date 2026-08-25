@@ -7,8 +7,10 @@ PORT={{ mtproto_zapret2_port }}
 QNUM={{ mtproto_zapret2_queue_num }}
 i=0
 while [ "$i" -lt 50 ]; do
+  rules=$("$NFT" list table ip "$TABLE" 2>/dev/null || true)
   if awk -v q="$QNUM" '$1 == q { found=1 } END { exit !found }' /proc/net/netfilter/nfnetlink_queue 2>/dev/null \
-    && "$NFT" list table ip "$TABLE" 2>/dev/null | grep -E "tcp (sport|dport) $PORT.*queue.*(num )?$QNUM([[:space:]]|$)" >/dev/null; then
+    && printf '%s\n' "$rules" | grep -E "tcp sport $PORT.*queue.*(num )?$QNUM([[:space:]]|$)" >/dev/null \
+    && printf '%s\n' "$rules" | grep -E "tcp dport $PORT.*queue.*(num )?$QNUM([[:space:]]|$)" >/dev/null; then
     exit 0
   fi
   i=$((i + 1))

@@ -28,7 +28,8 @@ def test_ssh_role_disables_password_authentication_only() -> None:
     assert "state: reloaded" in tasks
     assert "ansible.builtin.wait_for_connection" in tasks
     assert "00-00-disable-password-auth.conf" in tasks
-    assert "00-disable-password-auth.conf" in tasks
+    assert "/00-disable-password-auth.conf" not in tasks
+    assert tasks.count("when: ssh_hardening_config.changed") == 4
 
 
 def test_single_deploy_hardens_ssh_before_installing_application() -> None:

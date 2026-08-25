@@ -62,15 +62,9 @@ Telemt работает от системного пользователя `tele
 не выдаётся.
 
 Существующий `/opt/mtproto/telemt/telemt.toml` при деплое не перезаписывается.
-Роль точечно заменяет только активные значения `synlimit = "iptables"` или
-`synlimit = "nftables"` (включая одинарные кавычки и inline-комментарии) на
-`synlimit = false`, а также удаляет активный `client_mss`. Остальные ключи и
-форматирование сохраняются. Перед изменением роль останавливает legacy-контейнер
-и systemd-сервис, чтобы ни один процесс Telemt не мог параллельно перезаписать
-файл. Затем роль запоминает SHA-256 уже мигрированного файла и проверяет, что
-запуск systemd и read-only connectivity probe его не изменили. Владелец и права
-меняются на `telemt:telemt` и `0640`, чтобы HTTP API мог атомарно обновлять
-пользователей.
+При чистой установке он создаётся из example-конфига, где `synlimit = false` и
+нет `client_mss`. Владелец и права поддерживаются как `telemt:telemt` и `0640`,
+чтобы HTTP API мог атомарно обновлять пользователей.
 
 Роль скачивает официальный архив Zapret2 `v1.0.3` и проверяет SHA-256
 `5220d9253b1fc858c7a1e0a6340f2d87f2e30ed24f71c5cee19dfc458734e6a5`.
@@ -79,11 +73,11 @@ Telemt работает от системного пользователя `tele
 создаёт отдельную таблицу `ip MTProto` и направляет входящий и исходящий TCP-
 трафик порта 443 в NFQUEUE 200 с флагом `bypass`.
 
-Перед cutover роль останавливает управляемые V3/V4-сервисы, удаляет только
-старые `MTPR_SYNFIX` и `mtproto-syn-fix-ios-443`, затем проверяет, что очередь
-200 не занята сторонним процессом или nftables-правилом. При конфликте playbook
-останавливается до установки новых правил. Telemt запускается только после
-успешной регистрации Zapret2 в NFQUEUE. Параметр inventory
+При первой установке роль проверяет, что таблица `ip MTProto` и очередь 200 не
+заняты сторонним сервисом. При конфликте playbook останавливается до установки
+новых правил. При последующих запусках Zapret2 и Telemt перезапускаются только
+при изменении их файлов. Systemd readiness probe требует регистрацию NFQUEUE и
+оба правила для входящего и исходящего трафика. Параметр inventory
 `telemt_caddy_dependency=true` добавляет Caddy в `After`/`Wants` Telemt, но не
 устанавливает и не настраивает сам Caddy.
 
@@ -114,18 +108,11 @@ systemctl is-active mtpr-zapret2
 /usr/sbin/nft list table ip MTProto
 awk '$1 == 200 { found=1 } END { exit !found }' \
   /proc/net/netfilter/nfnetlink_queue
-! iptables-save | grep -E 'MTPR_SYNFIX|mtproto-syn-fix-ios-443'
-! { iptables-save; ip6tables-save; } | grep -E 'TMT_SYN_[0-9a-f]{12}|TELEMT_SYNLIMIT'
-! nft list tables | grep -E 'telemt_synlimit(_[0-9a-f]{16})?$'
-! grep -Eq '^[[:space:]]*client_mss[[:space:]]*=' \
-  /opt/mtproto/telemt/telemt.toml
 docker compose ps
 ```
 
-Первичная миграция удаляет старый контейнер Telemt и V3 SYN fix перед запуском
-systemd и не выполняет автоматический rollback. При ошибке playbook
-останавливается на текущем сервере благодаря `serial: 1` и
-`any_errors_fatal: true`.
+При ошибке playbook останавливается на текущем сервере благодаря `serial: 1` и
+`any_errors_fatal: true`. Автоматический rollback не выполняется.
 
 ## Возврат версии
 

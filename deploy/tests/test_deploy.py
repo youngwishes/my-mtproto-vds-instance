@@ -161,7 +161,7 @@ application = "unchanged-secret"
     assert config_path.read_text() == expected
 
 
-def test_deploy_playbook_contains_binary_cutover_and_read_only_probe(
+def test_deploy_playbook_contains_steady_state_services_without_legacy_tasks(
     tmp_path: Path,
 ) -> None:
     environment = os.environ.copy()
@@ -186,148 +186,28 @@ def test_deploy_playbook_contains_binary_cutover_and_read_only_probe(
     for task_name in (
         "Verify downloaded Telemt checksum",
         "Install Telemt binary",
+        "Verify Zapret2 NFQUEUE is available",
+        "Install Zapret2 nfqws2 binary",
+        "Install MTProto Zapret2 service",
+        "Ensure MTProto Zapret2 service is running",
+        "Apply pending service restarts",
+        "Ensure Telemt systemd service is running",
+        "Verify FastAPI can reach host Telemt without changing config",
+    ):
+        assert task_name in result.stdout
+
+    for legacy_task_name in (
         "Remove legacy Telemt container",
         "Stop Telemt systemd service before config migration",
         "Disable built-in Telemt SYN limiter",
         "Stop legacy MTProto V3 SYN fix",
         "Remove legacy MTProto V3 firewall rules",
-        "Verify Zapret2 NFQUEUE is available",
-        "Install Zapret2 nfqws2 binary",
-        "Install MTProto Zapret2 service",
-        "Start MTProto Zapret2 service",
-        "Verify MTProto Zapret2 runtime",
-        "Start Telemt systemd service",
         "Verify Telemt SYN limiter rules are absent",
-        "Verify FastAPI can reach host Telemt without changing config",
+        "Verify MTProto Zapret2 runtime",
         "Verify Telemt config checksum is unchanged",
+        "Wait for FastAPI port",
     ):
-        assert task_name in result.stdout
-
-    stopped_container = result.stdout.index("Remove legacy Telemt container")
-    stopped_service = result.stdout.index(
-        "Stop Telemt systemd service before config migration"
-    )
-    migrated = result.stdout.index("Disable built-in Telemt SYN limiter")
-    checksummed = result.stdout.index("Record the stopped Telemt config checksum")
-    started = result.stdout.index("Start Telemt systemd service")
-    assert stopped_container < stopped_service < migrated < checksummed < started
-
-
-def test_syn_limiter_migration_preserves_the_rest_of_the_config(
-    tmp_path: Path,
-) -> None:
-    config_path = tmp_path / "telemt.toml"
-    source = """
-# Preserve this comment and all original spacing.
-[[server.listeners]]
-ip = "0.0.0.0"
-port = 443
-synlimit   = "iptables"   # temporary backend
-client_mss = "tspu"       # conflicts with Zapret2
-
-[[server.listeners]]
-ip = "::"
-port = 443
-synlimit = 'nftables'# literal string
-
-[[server.listeners]]
-ip = "127.0.0.1"
-port = 8443
-synlimit = false
-
-[access.users]
-application = "unchanged-secret"
-""".lstrip()
-    expected = (
-        source.replace('"iptables"', "false")
-        .replace("'nftables'", "false")
-        .replace('client_mss = "tspu"       # conflicts with Zapret2\n', "")
-    )
-    config_path.write_text(source)
-    playbook = tmp_path / "disable-syn-limiter.yml"
-    task_file = (
-        ROOT / "roles" / "mtproto_deploy" / "tasks" / "disable_syn_limiter.yml"
-    )
-    playbook.write_text(
-        f"""
----
-- name: Test SYN limiter migration
-  hosts: localhost
-  gather_facts: false
-  vars:
-    telemt_config_path: {json.dumps(str(config_path))}
-  tasks:
-    - name: Run production migration task
-      ansible.builtin.import_tasks: {json.dumps(str(task_file))}
-""".lstrip()
-    )
-
-    first_run = _run_local_playbook(playbook, tmp_path)
-
-    assert first_run.returncode == 0, first_run.stderr + first_run.stdout
-    assert config_path.read_text() == expected
-    migrated = tomllib.loads(config_path.read_text())
-    assert [
-        listener["synlimit"] for listener in migrated["server"]["listeners"]
-    ] == [False, False, False]
-    assert migrated["access"]["users"] == {"application": "unchanged-secret"}
-
-    second_run = _run_local_playbook(playbook, tmp_path)
-
-    assert second_run.returncode == 0, second_run.stderr + second_run.stdout
-    assert "changed=0" in second_run.stdout
-
-
-@pytest.mark.parametrize(
-    ("iptables_output", "nft_output", "should_pass"),
-    [
-        ("", "table inet filter\n", True),
-        (":TMT_SYN_0123456789ab - [0:0]\n", "", False),
-        (":TELEMT_SYNLIMIT - [0:0]\n", "", False),
-        ("", "table inet telemt_synlimit_0123456789abcdef\n", False),
-        ("", "table ip telemt_synlimit\n", False),
-    ],
-)
-def test_firewall_policy_detects_telemt_rules_from_both_backends(
-    tmp_path: Path,
-    iptables_output: str,
-    nft_output: str,
-    should_pass: bool,
-) -> None:
-    playbook = tmp_path / "verify-firewall-policy.yml"
-    task_file = (
-        ROOT
-        / "roles"
-        / "mtproto_deploy"
-        / "tasks"
-        / "assert_no_syn_limiter_rules.yml"
-    )
-    playbook.write_text(
-        f"""
----
-- name: Test firewall policy
-  hosts: localhost
-  gather_facts: false
-  vars:
-    telemt_iptables_rule_sets:
-      results:
-        - stdout: {json.dumps(iptables_output)}
-        - stdout: ""
-    telemt_nft_tables:
-      stdout: {json.dumps(nft_output)}
-  tasks:
-    - name: Run production firewall assertion
-      ansible.builtin.import_tasks: {json.dumps(str(task_file))}
-""".lstrip()
-    )
-
-    result = _run_local_playbook(playbook, tmp_path)
-
-    if should_pass:
-        assert result.returncode == 0, result.stderr + result.stdout
-    else:
-        assert result.returncode != 0
-        assert "Telemt SYN limiter firewall rules are still present" in result.stdout
+        assert legacy_task_name not in result.stdout
 
 
 def test_installed_telemt_version_check_is_exact() -> None:
@@ -428,7 +308,7 @@ def test_env_migration_replaces_only_telemt_api_root() -> None:
     tasks = (ROOT / "roles" / "mtproto_deploy" / "tasks" / "main.yml").read_text()
     migration = tasks.split("- name: Route FastAPI to Telemt on the Docker host", 1)[
         1
-    ].split("- name: Check for legacy Telemt container", 1)[0]
+    ].split("- name: Prepare pinned MTProto Zapret2 release", 1)[0]
 
     assert "ansible.builtin.lineinfile:" in migration
     assert "regexp: '^TELEMT_API_ROOT='" in migration
@@ -436,26 +316,62 @@ def test_env_migration_replaces_only_telemt_api_root() -> None:
     assert "create: false" in migration
 
 
-def test_cutover_checks_config_after_read_only_fastapi_probe() -> None:
+def test_fastapi_probe_retries_without_a_separate_port_wait() -> None:
     tasks = (ROOT / "roles" / "mtproto_deploy" / "tasks" / "main.yml").read_text()
 
-    stopped = tasks.index("- name: Record the stopped Telemt config checksum")
     probe = tasks.index(
         "- name: Verify FastAPI can reach host Telemt without changing config"
     )
-    verified = tasks.index("- name: Verify Telemt config checksum is unchanged")
-    assert stopped < probe < verified
-    assert (
-        "fastapi_missing_user.get('status', -1) == 404"
-        in tasks
-    )
-    assert (
-        "fastapi_missing_user.get('json', {}).get('detail', '') =="
-        in tasks
-    )
-    assert "retries: 6" in tasks[probe:verified]
-    assert "delay: 2" in tasks[probe:verified]
-    assert "telemt_config_after_cutover.stat.checksum == telemt_config_checksum" in tasks
+    probe_tasks = tasks[probe:]
+    assert "fastapi_missing_user.get('status', -1) == 404" in probe_tasks
+    assert "fastapi_missing_user.get('json', {}).get('detail', '') ==" in probe_tasks
+    assert "retries: 6" in probe_tasks
+    assert "delay: 2" in probe_tasks
+    assert "ansible.builtin.wait_for:" not in tasks
+
+
+def test_existing_swapfile_is_activated_when_not_listed_by_swapon() -> None:
+    tasks = (ROOT / "roles" / "mtproto_deploy" / "tasks" / "main.yml").read_text()
+
+    assert "swapon --show=NAME --noheadings" in tasks
+    assert "when: not mtproto_swap_active" in tasks
+
+
+def test_existing_zapret2_skips_first_install_queue_preflight() -> None:
+    tasks = (
+        ROOT / "roles" / "mtproto_deploy" / "tasks" / "install_zapret2.yml"
+    ).read_text()
+
+    for task_name in (
+        "Read active NFQUEUE registry before Zapret2 cutover",
+        "Read nftables queue rules before Zapret2 cutover",
+        "Verify Zapret2 NFQUEUE is available",
+    ):
+        task = tasks.split(f"- name: {task_name}", 1)[1].split("\n- name:", 1)[0]
+        assert "when: not mtproto_zapret2_existing_service.stat.exists" in task
+
+
+def test_zapret2_file_changes_notify_the_restart_handler() -> None:
+    tasks = (
+        ROOT / "roles" / "mtproto_deploy" / "tasks" / "install_zapret2.yml"
+    ).read_text()
+    handlers = (
+        ROOT / "roles" / "mtproto_deploy" / "handlers" / "main.yml"
+    ).read_text()
+
+    for task_name in (
+        "Install Zapret2 nfqws2 binary",
+        "Install upstream Zapret2 Lua libraries",
+        "Install MTProto Zapret2 Lua strategy",
+        "Install MTProto Zapret2 configuration",
+        "Install MTProto Zapret2 startup script",
+        "Install MTProto Zapret2 readiness probe",
+        "Install MTProto Zapret2 service",
+    ):
+        task = tasks.split(f"- name: {task_name}", 1)[1].split("\n- name:", 1)[0]
+        assert "notify: Restart MTProto Zapret2" in task
+
+    assert "- name: Restart MTProto Zapret2" in handlers
 
 
 def test_verified_archive_always_reextracts_the_installed_binary() -> None:
@@ -543,6 +459,83 @@ def test_zapret2_startup_queues_both_mtproto_directions_before_starting_nfqws(
 
     assert positions == sorted(positions)
     assert nfqws_log.read_text() == "@/etc/zapret2/mtproto.conf\n"
+
+
+def test_zapret2_readiness_requires_both_mtproto_directions(
+    tmp_path: Path,
+) -> None:
+    fake_nft = tmp_path / "nft"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_nft.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' 'tcp sport 443 counter queue flags bypass to 200'\n"
+    )
+    fake_nft.chmod(0o755)
+    (fake_bin / "awk").write_text("#!/bin/sh\nexit 0\n")
+    (fake_bin / "sleep").write_text("#!/bin/sh\nexit 0\n")
+    (fake_bin / "awk").chmod(0o755)
+    (fake_bin / "sleep").chmod(0o755)
+
+    script_path = tmp_path / "mtpr-zapret2-ready"
+    playbook = tmp_path / "render-zapret2-ready.yml"
+    template_path = (
+        ROOT
+        / "roles"
+        / "mtproto_deploy"
+        / "templates"
+        / "mtpr-zapret2-ready.sh.j2"
+    )
+    playbook.write_text(
+        f"""
+---
+- name: Render MTProto Zapret2 readiness probe
+  hosts: localhost
+  gather_facts: false
+  vars:
+    mtproto_zapret2_nft_binary: {json.dumps(str(fake_nft))}
+    mtproto_zapret2_table: MTProto
+    mtproto_zapret2_port: 443
+    mtproto_zapret2_queue_num: 200
+  tasks:
+    - name: Render production Zapret2 readiness template
+      ansible.builtin.template:
+        src: {json.dumps(str(template_path))}
+        dest: {json.dumps(str(script_path))}
+        mode: "0755"
+""".lstrip()
+    )
+
+    rendered = _run_local_playbook(playbook, tmp_path)
+
+    assert rendered.returncode == 0, rendered.stderr + rendered.stdout
+    environment = os.environ.copy()
+    environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+    ready = subprocess.run(
+        [str(script_path)],
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert ready.returncode != 0
+
+    fake_nft.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' "
+        "'tcp sport 443 counter queue flags bypass to 200' "
+        "'tcp dport 443 counter queue flags bypass to 200'\n"
+    )
+    ready = subprocess.run(
+        [str(script_path)],
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert ready.returncode == 0, ready.stderr
 
 
 @pytest.mark.parametrize(

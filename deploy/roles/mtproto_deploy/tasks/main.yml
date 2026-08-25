@@ -12,15 +12,24 @@
   ansible.builtin.file:
     path: /swapfile
     mode: "0600"
-  when: not mtproto_swapfile.stat.exists
 
 - name: Format swap
   ansible.builtin.command: mkswap /swapfile
   when: not mtproto_swapfile.stat.exists
 
+- name: Read active swap devices
+  ansible.builtin.command: swapon --show=NAME --noheadings
+  register: mtproto_active_swaps
+  changed_when: false
+
+- name: Record whether the swap file is active
+  ansible.builtin.set_fact:
+    mtproto_swap_active: >-
+      {{ '/swapfile' in (mtproto_active_swaps.stdout_lines | map('trim') | list) }}
+
 - name: Enable swap
   ansible.builtin.command: swapon /swapfile
-  when: not mtproto_swapfile.stat.exists
+  when: not mtproto_swap_active
 
 - name: Persist swap in fstab
   ansible.builtin.lineinfile:
@@ -39,11 +48,9 @@
   ansible.builtin.apt:
     name:
       - ca-certificates
-      - conntrack
       - curl
       - git
       - iptables
-      - libcap2-bin
       - nftables
       - tar
     state: present
@@ -178,19 +185,6 @@
     group: telemt
     mode: "0640"
 
-- name: Check Telemt config before cutover
-  ansible.builtin.stat:
-    path: "{{ telemt_config_path }}"
-    checksum_algorithm: sha256
-  register: telemt_config_before_cutover
-
-- name: Require a readable Telemt config
-  ansible.builtin.assert:
-    that:
-      - telemt_config_before_cutover.stat.exists
-      - telemt_config_before_cutover.stat.isreg
-      - telemt_config_before_cutover.stat.readable
-
 - name: Allow Telemt API to update its config atomically
   ansible.builtin.file:
     path: "{{ telemt_config_path }}"
@@ -225,71 +219,20 @@
 - name: Prepare pinned MTProto Zapret2 release
   ansible.builtin.import_tasks: prepare_zapret2.yml
 
-- name: Check for legacy Telemt container
-  ansible.builtin.command:
-    cmd: docker container inspect telemt
-  register: legacy_telemt_container
-  changed_when: false
-  failed_when: false
-
-- name: Stop legacy Telemt container
-  ansible.builtin.command:
-    cmd: docker stop --time 30 telemt
-  when: legacy_telemt_container.rc == 0
-
-- name: Remove legacy Telemt container
-  ansible.builtin.command:
-    cmd: docker rm telemt
-  when: legacy_telemt_container.rc == 0
-
-- name: Stop Telemt systemd service before config migration
-  ansible.builtin.systemd_service:
-    name: "{{ telemt_service_name }}"
-    state: stopped
-    daemon_reload: true
-
-- name: Apply Telemt SYN limiter policy
-  ansible.builtin.import_tasks: disable_syn_limiter.yml
-
-- name: Verify Telemt config has no enabled SYN limiter
-  ansible.builtin.command:
-    argv:
-      - grep
-      - -Eq
-      - "^[[:space:]]*synlimit[[:space:]]*=[[:space:]]*(\"(iptables|nftables)\"|'(iptables|nftables)')[[:space:]]*(#.*)?$"
-      - "{{ telemt_config_path }}"
-  register: telemt_enabled_syn_limiter
-  changed_when: false
-  failed_when: telemt_enabled_syn_limiter.rc != 1
-
-- name: Verify Telemt config has no client MSS override
-  ansible.builtin.command:
-    argv:
-      - grep
-      - -Eq
-      - "^[[:space:]]*client_mss[[:space:]]*="
-      - "{{ telemt_config_path }}"
-  register: telemt_client_mss_override
-  changed_when: false
-  failed_when: telemt_client_mss_override.rc != 1
-
 - name: Install MTProto Zapret2 V4
   ansible.builtin.import_tasks: install_zapret2.yml
 
-- name: Refresh Telemt config checksum after stopping its writers
-  ansible.builtin.stat:
-    path: "{{ telemt_config_path }}"
-    checksum_algorithm: sha256
-  register: telemt_config_stopped
-
-- name: Record the stopped Telemt config checksum
-  ansible.builtin.set_fact:
-    telemt_config_checksum: "{{ telemt_config_stopped.stat.checksum }}"
-
-- name: Apply pending Telemt restart
+- name: Apply pending service restarts
   ansible.builtin.meta: flush_handlers
 
-- name: Start Telemt systemd service
+- name: Ensure MTProto Zapret2 service is running
+  ansible.builtin.systemd_service:
+    name: "{{ mtproto_zapret2_service_name }}.service"
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Ensure Telemt systemd service is running
   ansible.builtin.systemd_service:
     name: "{{ telemt_service_name }}"
     state: started
@@ -307,24 +250,6 @@
   delay: 5
   until: telemt_liveness.rc == 0
 
-- name: Read host firewall rules after Telemt startup
-  ansible.builtin.command:
-    cmd: "{{ item }}"
-  loop:
-    - iptables-save
-    - ip6tables-save
-  register: telemt_iptables_rule_sets
-  changed_when: false
-
-- name: Read native nftables tables after Telemt startup
-  ansible.builtin.command:
-    cmd: nft list tables
-  register: telemt_nft_tables
-  changed_when: false
-
-- name: Apply Telemt firewall policy assertions
-  ansible.builtin.import_tasks: assert_no_syn_limiter_rules.yml
-
 - name: Probe a missing user directly through Telemt
   ansible.builtin.uri:
     url: http://127.0.0.1:9091/v1/users/__ansible_connectivity_probe__
@@ -337,13 +262,6 @@
   ansible.builtin.command:
     cmd: docker compose up -d --build --remove-orphans api
     chdir: "{{ mtproto_deploy_dir }}"
-
-- name: Wait for FastAPI port
-  ansible.builtin.wait_for:
-    host: 127.0.0.1
-    port: 8080
-    delay: 1
-    timeout: 60
 
 - name: Verify FastAPI can reach host Telemt without changing config
   ansible.builtin.uri:
@@ -358,15 +276,3 @@
     fastapi_missing_user.get('status', -1) == 404 and
     fastapi_missing_user.get('json', {}).get('detail', '') ==
     telemt_missing_user.json.error.message
-
-- name: Read Telemt config checksum after verification
-  ansible.builtin.stat:
-    path: "{{ telemt_config_path }}"
-    checksum_algorithm: sha256
-  register: telemt_config_after_cutover
-
-- name: Verify Telemt config checksum is unchanged
-  ansible.builtin.assert:
-    that:
-      - telemt_config_after_cutover.stat.checksum == telemt_config_checksum
-    fail_msg: Telemt config content changed during binary cutover

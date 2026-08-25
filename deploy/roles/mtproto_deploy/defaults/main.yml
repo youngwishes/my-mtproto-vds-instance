@@ -35,7 +35,6 @@ mtproto_zapret2_start_script_path: /usr/local/sbin/mtpr-zapret2-start.sh
 mtproto_zapret2_service_name: mtpr-zapret2
 mtproto_zapret2_ready_script_path: /usr/local/sbin/mtpr-zapret2-ready.sh
 mtproto_zapret2_nft_binary: /usr/sbin/nft
-mtproto_zapret2_iptables_binary: /usr/sbin/iptables
 mtproto_zapret2_table: MTProto
 mtproto_zapret2_port: 443
 mtproto_zapret2_queue_num: 200
