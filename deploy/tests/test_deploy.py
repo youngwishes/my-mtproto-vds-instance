@@ -112,6 +112,7 @@ existing = "unchanged-secret"
         capture_output=True,
         text=True,
     )
+    first_result = config_path.read_text()
     second_run = subprocess.run(
         [str(script_path), str(config_path)],
         check=False,
@@ -123,7 +124,8 @@ existing = "unchanged-secret"
     assert first_run.stdout.strip() == "changed"
     assert second_run.returncode == 0, second_run.stderr
     assert second_run.stdout.strip() == "unchanged"
-    config = tomllib.loads(config_path.read_text())
+    assert config_path.read_text() == first_result
+    config = tomllib.loads(first_result)
     assert config["server"] == {
         "port": 443,
         "api": {
