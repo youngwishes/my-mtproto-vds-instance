@@ -5,6 +5,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -274,6 +275,190 @@ def _load_ansible_yaml(path: Path) -> list[dict]:
 
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
+
+
+def _prepare_swap_scenario(tmp_path: Path) -> dict[str, Path]:
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    scenario = {
+        "active": tmp_path / "active-swaps",
+        "capacity": tmp_path / "capacity-bytes",
+        "canonical": tmp_path / "swapfile",
+        "failure_marker": tmp_path / "swapoff-failed-once",
+        "log": tmp_path / "swap-commands.log",
+        "signatures": tmp_path / "swap-signatures",
+        "temporary": tmp_path / "swapfile.ansible-replacement",
+    }
+    for name in ("active", "log", "signatures"):
+        scenario[name].write_text("")
+
+    command = fake_bin / "swap-command"
+    command.write_text(
+        f"""#!{sys.executable}
+import os
+import sys
+from pathlib import Path
+
+
+def read_lines(variable):
+    path = Path(os.environ[variable])
+    if not path.exists():
+        return []
+    return [line for line in path.read_text().splitlines() if line]
+
+
+def write_lines(variable, lines):
+    Path(os.environ[variable]).write_text("".join(f"{{line}}\\n" for line in lines))
+
+
+def available_bytes():
+    capacity = int(Path(os.environ["SWAP_CAPACITY"]).read_text())
+    allocated = sum(
+        path.stat().st_size
+        for path in (
+            Path(os.environ["SWAP_CANONICAL"]),
+            Path(os.environ["SWAP_TEMPORARY"]),
+        )
+        if path.exists()
+    )
+    return capacity - allocated
+
+
+name = Path(sys.argv[0]).name
+args = sys.argv[1:]
+with Path(os.environ["SWAP_LOG"]).open("a") as log:
+    log.write(f"{{name}} {{' '.join(args)}}\\n")
+
+if name == "stat":
+    print(Path(args[-1]).stat().st_size)
+elif name == "df":
+    print("Avail")
+    print(available_bytes())
+elif name == "blkid":
+    path = args[-1]
+    if path in read_lines("SWAP_SIGNATURES") and Path(path).exists():
+        print("swap")
+    else:
+        raise SystemExit(2)
+elif name == "fallocate":
+    size = int(args[1].removesuffix("M")) * 1024 * 1024
+    path = Path(args[2])
+    previous_size = path.stat().st_size if path.exists() else 0
+    if available_bytes() < max(size - previous_size, 0):
+        raise SystemExit(1)
+    path.touch()
+    with path.open("r+b") as allocated:
+        allocated.truncate(size)
+    signatures = [item for item in read_lines("SWAP_SIGNATURES") if item != str(path)]
+    write_lines("SWAP_SIGNATURES", signatures)
+elif name == "mkswap":
+    path = args[-1]
+    signatures = read_lines("SWAP_SIGNATURES")
+    if path not in signatures:
+        signatures.append(path)
+    write_lines("SWAP_SIGNATURES", signatures)
+elif name == "swapon" and args[0].startswith("--show"):
+    print("\\n".join(read_lines("SWAP_ACTIVE")))
+elif name == "swapon":
+    path = args[-1]
+    if path not in read_lines("SWAP_SIGNATURES"):
+        raise SystemExit(1)
+    active = read_lines("SWAP_ACTIVE")
+    if path not in active:
+        active.append(path)
+    write_lines("SWAP_ACTIVE", active)
+elif name == "swapoff":
+    path = args[-1]
+    marker = Path(os.environ["SWAP_FAILURE_MARKER"])
+    if path == os.environ.get("SWAP_FAIL_SWAPOFF_ONCE") and not marker.exists():
+        marker.touch()
+        raise SystemExit(1)
+    active = read_lines("SWAP_ACTIVE")
+    if path not in active:
+        raise SystemExit(1)
+    write_lines("SWAP_ACTIVE", [item for item in active if item != path])
+else:
+    raise SystemExit(f"unsupported fake command: {{name}} {{args}}")
+"""
+    )
+    command.chmod(0o755)
+    for name in ("blkid", "df", "fallocate", "mkswap", "stat", "swapoff", "swapon"):
+        (fake_bin / name).symlink_to(command)
+    scenario["fake_bin"] = fake_bin
+    return scenario
+
+
+def _run_swap_scenario(
+    tmp_path: Path,
+    scenario: dict[str, Path],
+    *,
+    fail_swapoff_once: Path | None = None,
+) -> subprocess.CompletedProcess:
+    tasks = _load_ansible_yaml(
+        ROOT / "roles" / "mtproto_deploy" / "tasks" / "configure_swap.yml"
+    )
+    legacy_cleanup = next(
+        index
+        for index, task in enumerate(tasks)
+        if task["name"] == "Read active swap devices before legacy cleanup"
+    )
+    tasks = tasks[:legacy_cleanup]
+    for task in tasks:
+        file_args = task.get("ansible.builtin.file")
+        if file_args is not None:
+            file_args.pop("owner", None)
+            file_args.pop("group", None)
+
+    scenario_tasks = tmp_path / "swap-scenario-tasks.json"
+    scenario_tasks.write_text(json.dumps(tasks))
+    playbook = tmp_path / "run-swap-scenario.yml"
+    environment = {
+        "PATH": f"{scenario['fake_bin']}:/usr/bin:/bin:/usr/sbin:/sbin",
+        "SWAP_ACTIVE": str(scenario["active"]),
+        "SWAP_CANONICAL": str(scenario["canonical"]),
+        "SWAP_CAPACITY": str(scenario["capacity"]),
+        "SWAP_FAILURE_MARKER": str(scenario["failure_marker"]),
+        "SWAP_FAIL_SWAPOFF_ONCE": str(fail_swapoff_once or ""),
+        "SWAP_LOG": str(scenario["log"]),
+        "SWAP_SIGNATURES": str(scenario["signatures"]),
+        "SWAP_TEMPORARY": str(scenario["temporary"]),
+    }
+    playbook.write_text(
+        f"""
+---
+- name: Run swap state scenario
+  hosts: localhost
+  gather_facts: false
+  environment: {json.dumps(environment)}
+  vars:
+    mtproto_swap_size_mb: 1
+    mtproto_swap_path: {json.dumps(str(scenario["canonical"]))}
+    mtproto_temporary_swap_path: {json.dumps(str(scenario["temporary"]))}
+  tasks:
+    - name: Run production swap tasks
+      ansible.builtin.import_tasks: {json.dumps(str(scenario_tasks))}
+""".lstrip()
+    )
+    return _run_local_playbook(playbook, tmp_path)
+
+
+def _run_swap_fstab_normalizer(fstab_path: Path) -> subprocess.CompletedProcess:
+    tasks = _load_ansible_yaml(
+        ROOT / "roles" / "mtproto_deploy" / "tasks" / "configure_swap.yml"
+    )
+    persistence = next(
+        task for task in tasks if task["name"] == "Persist canonical swap in fstab"
+    )
+    command = shlex.split(persistence["ansible.builtin.script"]["cmd"])
+    assert command[1:] == ["/etc/fstab"]
+    script = ROOT / "roles" / "mtproto_deploy" / "files" / command[0]
+    assert script.exists()
+    return subprocess.run(
+        [sys.executable, str(script), str(fstab_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
 
 def test_production_compose_runs_only_api_and_routes_to_host_telemt() -> None:
@@ -906,6 +1091,152 @@ def test_swap_replacement_preserves_active_temporary_swap_until_canonical_active
     assert "mtproto_swap_needs_replacement" not in cleanup_condition
     assert "mtproto_temporary_swap_path in" in cleanup_condition
     assert "when" not in tasks_by_name["Remove temporary replacement swap"]
+
+
+def test_swap_rerun_reuses_active_temporary_swap_with_reduced_free_space(
+    tmp_path: Path,
+) -> None:
+    scenario = _prepare_swap_scenario(tmp_path)
+    scenario["canonical"].write_bytes(b"\0" * (512 * 1024))
+    scenario["active"].write_text(f"{scenario['canonical']}\n")
+    scenario["signatures"].write_text(f"{scenario['canonical']}\n")
+    scenario["capacity"].write_text(str(3_145_728))
+
+    interrupted = _run_swap_scenario(
+        tmp_path,
+        scenario,
+        fail_swapoff_once=scenario["canonical"],
+    )
+
+    assert interrupted.returncode != 0
+    assert "Disable incorrectly sized canonical swap" in interrupted.stdout, (
+        interrupted.stderr + interrupted.stdout
+    )
+    assert scenario["active"].read_text().splitlines() == [
+        str(scenario["canonical"]),
+        str(scenario["temporary"]),
+    ]
+    assert scenario["temporary"].exists()
+    scenario["capacity"].write_text(str(2_097_152))
+
+    recovered = _run_swap_scenario(
+        tmp_path,
+        scenario,
+        fail_swapoff_once=scenario["canonical"],
+    )
+
+    assert recovered.returncode == 0, recovered.stderr + recovered.stdout
+    assert scenario["active"].read_text().splitlines() == [
+        str(scenario["canonical"])
+    ]
+    assert scenario["canonical"].stat().st_size == 1_048_576
+    assert str(scenario["canonical"]) in (
+        scenario["signatures"].read_text().splitlines()
+    )
+    assert not scenario["temporary"].exists()
+
+
+def test_swap_rerun_formats_partially_allocated_fresh_canonical_file(
+    tmp_path: Path,
+) -> None:
+    scenario = _prepare_swap_scenario(tmp_path)
+    scenario["canonical"].write_bytes(b"\0" * 1_048_576)
+    scenario["capacity"].write_text(str(5_242_880))
+
+    recovered = _run_swap_scenario(tmp_path, scenario)
+
+    assert recovered.returncode == 0, recovered.stderr + recovered.stdout
+    assert scenario["active"].read_text().splitlines() == [
+        str(scenario["canonical"])
+    ]
+    assert scenario["signatures"].read_text().splitlines() == [
+        str(scenario["canonical"])
+    ]
+
+
+def test_swap_rerun_formats_partially_allocated_replacement_canonical_file(
+    tmp_path: Path,
+) -> None:
+    scenario = _prepare_swap_scenario(tmp_path)
+    scenario["canonical"].write_bytes(b"\0" * 1_048_576)
+    scenario["temporary"].write_bytes(b"\0" * 1_048_576)
+    scenario["active"].write_text(f"{scenario['temporary']}\n")
+    scenario["signatures"].write_text(f"{scenario['temporary']}\n")
+    scenario["capacity"].write_text(str(3_145_728))
+
+    recovered = _run_swap_scenario(tmp_path, scenario)
+
+    assert recovered.returncode == 0, recovered.stderr + recovered.stdout
+    assert scenario["active"].read_text().splitlines() == [
+        str(scenario["canonical"])
+    ]
+    assert scenario["signatures"].read_text().splitlines() == [
+        str(scenario["temporary"]),
+        str(scenario["canonical"]),
+    ]
+    assert not scenario["temporary"].exists()
+
+
+def test_swap_fstab_normalizer_replaces_indented_and_duplicate_entries(
+    tmp_path: Path,
+) -> None:
+    fstab = tmp_path / "fstab"
+    fstab.write_text(
+        "UUID=root / ext4 defaults 0 1\n"
+        "  /2G_swapfile none swap sw 0 0\n"
+        "tmpfs /tmp tmpfs defaults 0 0\n"
+        "/swapfile none swap defaults 0 0\n"
+    )
+
+    result = _run_swap_fstab_normalizer(fstab)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "changed"
+    assert fstab.read_text() == (
+        "UUID=root / ext4 defaults 0 1\n"
+        "/swapfile none swap sw 0 0\n"
+        "tmpfs /tmp tmpfs defaults 0 0\n"
+    )
+
+
+def test_swap_fstab_normalizer_preserves_line_after_malformed_managed_entry(
+    tmp_path: Path,
+) -> None:
+    fstab = tmp_path / "fstab"
+    fstab.write_text(
+        "/swapfile\n"
+        "UUID=data /srv/data ext4 defaults 0 2\n"
+    )
+
+    result = _run_swap_fstab_normalizer(fstab)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "changed"
+    assert fstab.read_text() == (
+        "/swapfile none swap sw 0 0\n"
+        "UUID=data /srv/data ext4 defaults 0 2\n"
+    )
+
+
+def test_swap_fstab_normalizer_skips_canonical_second_run(tmp_path: Path) -> None:
+    fstab = tmp_path / "fstab"
+    canonical = (
+        "UUID=root / ext4 defaults 0 1\n"
+        "/swapfile none swap sw 0 0\n"
+        "UUID=data /srv/data ext4 defaults 0 2\n"
+    )
+    fstab.write_text(canonical)
+    original_inode = fstab.stat().st_ino
+
+    first = _run_swap_fstab_normalizer(fstab)
+    second = _run_swap_fstab_normalizer(fstab)
+
+    assert first.returncode == 0, first.stderr
+    assert first.stdout.strip() == "unchanged"
+    assert second.returncode == 0, second.stderr
+    assert second.stdout.strip() == "unchanged"
+    assert fstab.read_text() == canonical
+    assert fstab.stat().st_ino == original_inode
 
 
 def test_verified_archive_always_reextracts_the_installed_binary() -> None:
