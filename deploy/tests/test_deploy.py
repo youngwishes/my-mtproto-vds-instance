@@ -363,6 +363,8 @@ def test_deploy_playbook_contains_steady_state_services_without_legacy_tasks(
         "Verify downloaded Telemt checksum",
         "Install Telemt binary",
         "Configure Telemt external TLS masking",
+        "Inspect Telemt beobachten snapshot",
+        "Repair Telemt beobachten snapshot ownership",
         "Apply pending service restarts",
         "Ensure Telemt systemd service is running",
         "Verify Telemt external TLS mask",
@@ -458,6 +460,7 @@ def test_systemd_unit_grants_only_bind_service_capability(tmp_path: Path) -> Non
     assert "CapabilityBoundingSet=CAP_NET_BIND_SERVICE" in unit
     assert "CAP_NET_ADMIN" not in unit
     assert "NoNewPrivileges=true" in unit
+    assert "UMask=0027" in unit
 
 
 def test_steady_state_migration_preserves_unrelated_telemt_config(

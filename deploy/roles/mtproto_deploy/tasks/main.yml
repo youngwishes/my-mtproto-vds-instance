@@ -238,6 +238,20 @@
     line: "TELEMT_API_ROOT={{ telemt_api_root }}"
     create: false
 
+- name: Inspect Telemt beobachten snapshot
+  ansible.builtin.stat:
+    path: "{{ telemt_beobachten_path }}"
+  register: telemt_beobachten
+
+- name: Repair Telemt beobachten snapshot ownership
+  ansible.builtin.file:
+    path: "{{ telemt_beobachten_path }}"
+    state: file
+    owner: telemt
+    group: telemt
+    mode: "0640"
+  when: telemt_beobachten.stat.exists
+
 - name: Apply pending service restarts
   ansible.builtin.meta: flush_handlers
 
