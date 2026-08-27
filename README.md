@@ -19,6 +19,12 @@ docker compose -f docker-compose.local.yaml up --build
 Ansible как бинарный systemd-сервис на хосте. Telemt самостоятельно занимает
 порт `443` и использует внешний TLS-mask `beatvault.ru`.
 
+В production Telemt API привязан к `172.17.0.1:9091`; Docker whitelist —
+`172.16.0.0/12`, healthcheck whitelist — host default IPv4 `/32`.
+Публичный порт `9091` не должен давать HTTP-ответ. Checkout приложения хранится
+в `/opt/mtproto-app`, изменяемый конфиг — в `/opt/mtproto/telemt/telemt.toml`;
+канонический swap — `/swapfile` размером 2048 MiB, umask файлов Telemt — `0027`.
+
 ## API
 
 | Метод    | Путь                    | Описание                          |

@@ -10,7 +10,8 @@ ansible-playbook -i deploy/inventory.ini deploy/playbook.yml
 Playbook обрабатывает серверы по одному и останавливается при первой ошибке. На
 каждом сервере он отключает парольную SSH-аутентификацию, устанавливает
 зависимости, обновляет `/opt/mtproto-app` из ветки `main`, устанавливает Telemt
-как systemd-сервис и запускает FastAPI через Docker Compose.
+как systemd-сервис и запускает FastAPI через Docker Compose. Канонический swap
+— `/swapfile` размером 2048 MiB.
 
 Для точечного повторного деплоя можно ограничить запуск одним сервером:
 
@@ -63,7 +64,8 @@ Telemt работает от системного пользователя `tele
 `CAP_NET_BIND_SERVICE`, устанавливает `LimitNOFILE=65536` и запускает
 существующий `/opt/mtproto/telemt/telemt.toml`. Встроенный SYN-limiter Telemt
 отключён для всех listeners через `synlimit = false`; `CAP_NET_ADMIN` сервису
-не выдаётся.
+не выдаётся. `UMask=0027`, поэтому файлы, создаваемые Telemt, получают umask
+`0027`.
 
 Существующий `/opt/mtproto/telemt/telemt.toml` при деплое не перезаписывается.
 При чистой установке он создаётся из example-конфига, где `synlimit = false`,
@@ -98,9 +100,10 @@ TELEMT_API_ROOT=http://host.docker.internal:9091/v1
 в `/opt/mtproto-app`, отдельно от изменяемого конфига
 `/opt/mtproto/telemt/telemt.toml`.
 
-Миграция в `[server.api]` устанавливает `listen = "172.17.0.1:9091"` и
-whitelist из Docker-подсетей (`172.16.0.0/12`) и IPv4-адреса хоста (`/32`).
-Остальные параметры API, включая `enabled` и `read_only`, сохраняются.
+Миграция в `[server.api]` устанавливает Telemt API bind
+`172.17.0.1:9091`. Docker whitelist — `172.16.0.0/12`; healthcheck whitelist
+— host default IPv4 `/32`. Остальные параметры API, включая `enabled`
+и `read_only`, сохраняются. Публичный порт `9091` не должен давать HTTP-ответ.
 
 Проверить работающие сервисы:
 

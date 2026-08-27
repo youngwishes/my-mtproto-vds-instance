@@ -64,11 +64,14 @@ FastAPI деплоится в Docker, а Telemt запускается непо�
 FastAPI container :8080
     │ http://host.docker.internal:9091/v1
     ▼
-telemt.service :9091 ──► MTProto :443 ── fallback ──► beatvault.ru:443
+telemt.service 172.17.0.1:9091 ──► MTProto :443 ── fallback ──► beatvault.ru:443
 ```
 
 Публичный порт `443` принадлежит Telemt. Единственный TLS-домен —
 `beatvault.ru`; Telemt использует его же как неявный внешний `mask_host`.
+Telemt API привязан к `172.17.0.1:9091`: Docker whitelist — `172.16.0.0/12`,
+healthcheck whitelist — host default IPv4 `/32`. Публичный порт
+`9091` не должен давать HTTP-ответ.
 
 Docker Compose добавляет `host.docker.internal` через `host-gateway`. Для
 локальных e2e-тестов отдельный `docker-compose.local.yaml` по-прежнему запускает
@@ -77,3 +80,7 @@ Docker Compose добавляет `host.docker.internal` через `host-gatewa
 example-конфигом, что используется при чистой установке на сервер. Одноразовый
 setup-контейнер также точечно мигрирует уже существующий локальный
 `telemt.toml`.
+
+Роль хранит checkout приложения в `/opt/mtproto-app`, а изменяемый конфиг — в
+`/opt/mtproto/telemt/telemt.toml`. Канонический swap — `/swapfile` размером
+2048 MiB. Unit Telemt задаёт umask `0027` для файлов, создаваемых Telemt.
