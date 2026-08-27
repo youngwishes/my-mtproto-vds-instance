@@ -3,6 +3,10 @@ mtproto_repo_url: https://github.com/youngwishes/my-mtproto-vds-instance.git
 mtproto_app_dir: /opt/mtproto-app
 mtproto_repo_branch: main
 mtproto_swap_size_mb: 2048
+mtproto_swap_path: /swapfile
+mtproto_temporary_swap_path: /swapfile.ansible-replacement
+mtproto_legacy_swap_paths:
+  - /2G_swapfile
 telemt_version: 3.4.25
 telemt_release_base_url: https://github.com/telemt/telemt/releases/download
 telemt_binary_path: /usr/local/bin/telemt

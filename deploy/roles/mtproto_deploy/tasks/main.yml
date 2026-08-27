@@ -1,41 +1,6 @@
 ---
-- name: Check if swap already exists
-  ansible.builtin.stat:
-    path: /swapfile
-  register: mtproto_swapfile
-
-- name: Create swap file
-  ansible.builtin.command: fallocate -l {{ mtproto_swap_size_mb }}M /swapfile
-  when: not mtproto_swapfile.stat.exists
-
-- name: Set swap file permissions
-  ansible.builtin.file:
-    path: /swapfile
-    mode: "0600"
-
-- name: Format swap
-  ansible.builtin.command: mkswap /swapfile
-  when: not mtproto_swapfile.stat.exists
-
-- name: Read active swap devices
-  ansible.builtin.command: swapon --show=NAME --noheadings
-  register: mtproto_active_swaps
-  changed_when: false
-
-- name: Record whether the swap file is active
-  ansible.builtin.set_fact:
-    mtproto_swap_active: >-
-      {{ '/swapfile' in (mtproto_active_swaps.stdout_lines | map('trim') | list) }}
-
-- name: Enable swap
-  ansible.builtin.command: swapon /swapfile
-  when: not mtproto_swap_active
-
-- name: Persist swap in fstab
-  ansible.builtin.lineinfile:
-    path: /etc/fstab
-    line: /swapfile none swap sw 0 0
-    state: present
+- name: Configure canonical swap
+  ansible.builtin.import_tasks: configure_swap.yml
 
 - name: Set swappiness to 10
   ansible.posix.sysctl:

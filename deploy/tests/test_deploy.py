@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
@@ -249,6 +251,31 @@ def _run_local_playbook(playbook: Path, tmp_path: Path) -> subprocess.CompletedP
     )
 
 
+def _load_ansible_yaml(path: Path) -> list[dict]:
+    ansible_playbook = shutil.which("ansible-playbook")
+    assert ansible_playbook is not None
+    shebang = Path(ansible_playbook).read_text().splitlines()[0]
+    assert shebang.startswith("#!")
+    interpreter = shlex.split(shebang.removeprefix("#!"))
+    result = subprocess.run(
+        [
+            *interpreter,
+            "-c",
+            (
+                "import json, sys, yaml; from pathlib import Path; "
+                "print(json.dumps(yaml.safe_load(Path(sys.argv[1]).read_text())))"
+            ),
+            str(path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
 def test_production_compose_runs_only_api_and_routes_to_host_telemt() -> None:
     config = _compose_config(PROJECT_ROOT / "docker-compose.yaml")
 
@@ -360,6 +387,12 @@ def test_deploy_playbook_contains_steady_state_services_without_legacy_tasks(
 
     assert result.returncode == 0, result.stderr
     for task_name in (
+        "Read canonical swap size",
+        "Check disk space for swap replacement",
+        "Activate temporary replacement swap",
+        "Replace incorrectly sized canonical swap",
+        "Remove legacy extra swap",
+        "Persist canonical swap in fstab",
         "Verify downloaded Telemt checksum",
         "Install Telemt binary",
         "Configure Telemt external TLS masking",
@@ -391,6 +424,40 @@ def test_deploy_playbook_contains_steady_state_services_without_legacy_tasks(
         "Wait for FastAPI port",
     ):
         assert legacy_task_name not in result.stdout
+
+
+def test_swap_defaults_render_canonical_paths(tmp_path: Path) -> None:
+    rendered_defaults = tmp_path / "swap-defaults.json"
+    defaults_path = ROOT / "roles" / "mtproto_deploy" / "defaults" / "main.yml"
+    playbook = tmp_path / "render-swap-defaults.yml"
+    playbook.write_text(
+        f"""
+---
+- name: Render swap defaults
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load role defaults
+      ansible.builtin.include_vars:
+        file: {json.dumps(str(defaults_path))}
+    - name: Render canonical swap paths
+      ansible.builtin.copy:
+        content: >-
+          {{{{ {{'path': mtproto_swap_path,
+                 'temporary_path': mtproto_temporary_swap_path}} | to_json }}}}
+        dest: {json.dumps(str(rendered_defaults))}
+        mode: "0600"
+""".lstrip()
+    )
+
+    result = _run_local_playbook(playbook, tmp_path)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    rendered = json.loads(rendered_defaults.read_text())
+    mtproto_swap_path = rendered["path"]
+    mtproto_temporary_swap_path = rendered["temporary_path"]
+    assert mtproto_swap_path == "/swapfile"
+    assert mtproto_temporary_swap_path == "/swapfile.ansible-replacement"
 
 
 def test_installed_telemt_version_check_is_exact() -> None:
@@ -755,11 +822,90 @@ def test_fastapi_probe_retries_without_a_separate_port_wait() -> None:
     assert "ansible.builtin.wait_for:" not in tasks
 
 
-def test_existing_swapfile_is_activated_when_not_listed_by_swapon() -> None:
-    tasks = (ROOT / "roles" / "mtproto_deploy" / "tasks" / "main.yml").read_text()
+def test_swap_replacement_preserves_active_temporary_swap_until_canonical_active(
+) -> None:
+    tasks = _load_ansible_yaml(
+        ROOT / "roles" / "mtproto_deploy" / "tasks" / "configure_swap.yml"
+    )
+    tasks_by_name = {task["name"]: task for task in tasks}
+    task_names = [task["name"] for task in tasks]
 
-    assert "swapon --show=NAME --noheadings" in tasks
-    assert "when: not mtproto_swap_active" in tasks
+    required_state_tasks = {
+        "Read active swap devices before replacement",
+        "Record whether temporary replacement swap is active",
+        "Remove inactive stale temporary replacement swap",
+        "Allocate temporary replacement swap",
+        "Protect temporary replacement swap",
+        "Format temporary replacement swap",
+        "Activate temporary replacement swap",
+        "Disable incorrectly sized canonical swap",
+        "Replace incorrectly sized canonical swap",
+        "Format new canonical swap",
+        "Activate canonical swap",
+        "Disable temporary replacement swap",
+        "Remove temporary replacement swap",
+    }
+    assert required_state_tasks <= tasks_by_name.keys()
+
+    temporary_active_fact = tasks_by_name[
+        "Record whether temporary replacement swap is active"
+    ]["ansible.builtin.set_fact"]["mtproto_temporary_swap_active"]
+    assert "mtproto_temporary_swap_path in" in temporary_active_fact
+    assert "mtproto_active_swaps_before.stdout_lines" in temporary_active_fact
+
+    read_active = task_names.index("Read active swap devices before replacement")
+    record_temporary = task_names.index(
+        "Record whether temporary replacement swap is active"
+    )
+    activate_temporary = task_names.index("Activate temporary replacement swap")
+    disable_canonical = task_names.index(
+        "Disable incorrectly sized canonical swap"
+    )
+    replace_canonical = task_names.index(
+        "Replace incorrectly sized canonical swap"
+    )
+    format_canonical = task_names.index("Format new canonical swap")
+    activate_canonical = task_names.index("Activate canonical swap")
+    disable_temporary = task_names.index("Disable temporary replacement swap")
+    remove_temporary = task_names.index("Remove temporary replacement swap")
+    assert (
+        read_active
+        < record_temporary
+        < activate_temporary
+        < disable_canonical
+        < replace_canonical
+        < format_canonical
+        < activate_canonical
+        < disable_temporary
+        < remove_temporary
+    )
+
+    for task_name in (
+        "Remove inactive stale temporary replacement swap",
+        "Allocate temporary replacement swap",
+        "Protect temporary replacement swap",
+        "Format temporary replacement swap",
+        "Activate temporary replacement swap",
+    ):
+        conditions = tasks_by_name[task_name]["when"]
+        if isinstance(conditions, str):
+            conditions = [conditions]
+        assert "mtproto_swap_needs_replacement" in conditions
+        assert "not mtproto_temporary_swap_active" in conditions
+
+    assert "Disable stale temporary replacement swap" not in tasks_by_name
+    assert tasks_by_name["Activate canonical swap"]["ansible.builtin.command"][
+        "argv"
+    ] == ["swapon", "{{ mtproto_swap_path }}"]
+    assert tasks_by_name["Disable temporary replacement swap"][
+        "ansible.builtin.command"
+    ]["argv"] == ["swapoff", "{{ mtproto_temporary_swap_path }}"]
+    cleanup_condition = tasks_by_name["Disable temporary replacement swap"][
+        "when"
+    ]
+    assert "mtproto_swap_needs_replacement" not in cleanup_condition
+    assert "mtproto_temporary_swap_path in" in cleanup_condition
+    assert "when" not in tasks_by_name["Remove temporary replacement swap"]
 
 
 def test_verified_archive_always_reextracts_the_installed_binary() -> None:
