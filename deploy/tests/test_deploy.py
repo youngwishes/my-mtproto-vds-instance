@@ -35,10 +35,15 @@ def test_single_playbook_targets_every_inventory_server_serially(tmp_path: Path)
         for line in result.stdout.splitlines()
         if line.strip().startswith("vds")
     )
-    assert hosts == ["vds1", "vds2", "vds3", "vds4", "vds5"]
+    assert hosts == ["vds1", "vds2", "vds3", "vds4", "vds5", "vds6"]
 
 
-def test_inventory_assigns_the_expected_domain_to_every_server() -> None:
+def test_repository_has_no_one_shot_cleanup_playbook_or_role() -> None:
+    assert not (ROOT / "cleanup-experiments.yml").exists()
+    assert not (ROOT / "roles" / "experiment_cleanup").exists()
+
+
+def test_every_server_uses_the_role_wide_beatvault_profile() -> None:
     result = subprocess.run(
         [
             "ansible-inventory",
@@ -53,18 +58,153 @@ def test_inventory_assigns_the_expected_domain_to_every_server() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    inventory = json.loads(result.stdout)
-    hostvars = inventory["_meta"]["hostvars"]
-    assert {
-        host: hostvars[host]["mtproto_domain"]
-        for host in ("vds1", "vds2", "vds3", "vds4", "vds5")
-    } == {
-        "vds1": "fast.mtprotokeys.com",
-        "vds2": "reserve.mtprotokeys.com",
-        "vds3": "sub.mtprotokeys.com",
-        "vds4": "space.mtprotokeys.com",
-        "vds5": "kz.mtprotokeys.com",
+    hostvars = json.loads(result.stdout)["_meta"]["hostvars"]
+    profile_keys = {
+        "mtproto_domain",
+        "telemt_tls_domains",
+        "telemt_preserve_existing_tls_domains",
+        "telemt_mask_host",
+        "telemt_mask_port",
+        "telemt_self_steal_enabled",
+        "telemt_disable_legacy_zapret",
+        "telemt_client_mss",
+        "telemt_client_mss_bulk",
     }
+    for host in ("vds1", "vds2", "vds3", "vds4", "vds5", "vds6"):
+        assert profile_keys.isdisjoint(hostvars[host])
+
+
+def test_steady_state_migration_enforces_external_beatvault_profile(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "telemt.toml"
+    script_path = tmp_path / "configure-telemt.py"
+    playbook = tmp_path / "render-configure-telemt.yml"
+    template_path = (
+        ROOT
+        / "roles"
+        / "mtproto_deploy"
+        / "templates"
+        / "configure-telemt.py.j2"
+    )
+    config_path.write_text(
+        """
+[server]
+port = 443
+client_mss = "tspu"
+client_mss_bulk = "1400"
+
+[server.api]
+enabled = true
+listen = "0.0.0.0:9091"
+whitelist = []
+read_only = false
+
+[censorship]
+tls_domain = "old.example"
+tls_domains = ["another.example", "beatvault.ru"]
+unknown_sni_action = "drop"
+mask = false
+mask_host = "127.0.0.1"
+mask_port = 8443
+fake_cert_len = 2048
+tls_emulation = true
+mask_shape_hardening = true
+
+[access.users]
+existing = "unchanged-secret"
+""".lstrip()
+    )
+    playbook.write_text(
+        f"""
+---
+- name: Render steady-state Telemt migration
+  hosts: localhost
+  gather_facts: false
+  vars:
+    telemt_tls_domain: beatvault.ru
+    telemt_api_listen: 172.17.0.1:9091
+    telemt_api_whitelist:
+      - 172.16.0.0/12
+      - 203.0.113.10/32
+  tasks:
+    - name: Render migration script
+      ansible.builtin.template:
+        src: {json.dumps(str(template_path))}
+        dest: {json.dumps(str(script_path))}
+        mode: "0755"
+""".lstrip()
+    )
+
+    rendered = _run_local_playbook(playbook, tmp_path)
+    assert rendered.returncode == 0, rendered.stderr + rendered.stdout
+
+    first_run = subprocess.run(
+        [str(script_path), str(config_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    second_run = subprocess.run(
+        [str(script_path), str(config_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert first_run.returncode == 0, first_run.stderr
+    assert first_run.stdout.strip() == "changed"
+    assert second_run.returncode == 0, second_run.stderr
+    assert second_run.stdout.strip() == "unchanged"
+    config = tomllib.loads(config_path.read_text())
+    assert config["server"] == {
+        "port": 443,
+        "api": {
+            "enabled": True,
+            "listen": "172.17.0.1:9091",
+            "whitelist": ["172.16.0.0/12", "203.0.113.10/32"],
+            "read_only": False,
+        },
+    }
+    assert config["censorship"] == {
+        "tls_domain": "beatvault.ru",
+        "unknown_sni_action": "mask",
+        "mask": True,
+        "mask_port": 443,
+        "fake_cert_len": 2048,
+        "tls_emulation": False,
+        "mask_shape_hardening": True,
+    }
+    assert config["access"]["users"] == {"existing": "unchanged-secret"}
+
+
+def test_application_checkout_is_separate_from_mutable_telemt_config(
+    tmp_path: Path,
+) -> None:
+    playbook = tmp_path / "check-role-paths.yml"
+    defaults_path = ROOT / "roles" / "mtproto_deploy" / "defaults" / "main.yml"
+    playbook.write_text(
+        f"""
+---
+- name: Check role storage paths
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load role defaults
+      ansible.builtin.include_vars:
+        file: {json.dumps(str(defaults_path))}
+    - name: Verify application and mutable state are separated
+      ansible.builtin.assert:
+        that:
+          - mtproto_app_dir == '/opt/mtproto-app'
+          - telemt_config_dir == '/opt/mtproto/telemt'
+          - telemt_config_path == '/opt/mtproto/telemt/telemt.toml'
+""".lstrip()
+    )
+
+    result = _run_local_playbook(playbook, tmp_path)
+
+    assert result.returncode == 0, result.stderr + result.stdout
 
 
 def _compose_config(compose_file: Path) -> dict:
@@ -131,7 +271,7 @@ def test_local_compose_runs_pinned_telemt_without_net_admin() -> None:
     )
 
 
-def test_example_config_enables_required_client_network_controls() -> None:
+def test_example_config_disables_optional_client_network_controls() -> None:
     config = tomllib.loads(
         (PROJECT_ROOT / "telemt" / "telemt.example.toml").read_text()
     )
@@ -141,8 +281,16 @@ def test_example_config_enables_required_client_network_controls() -> None:
         listener.get("synlimit") is False
         for listener in config["server"]["listeners"]
     )
-    assert config["server"]["client_mss"] == "tspu"
-    assert config["server"]["client_mss_bulk"] == "1400"
+    assert "client_mss" not in config["server"]
+    assert "client_mss_bulk" not in config["server"]
+    assert config["censorship"] == {
+        "tls_domain": "beatvault.ru",
+        "unknown_sni_action": "mask",
+        "mask": True,
+        "mask_port": 443,
+        "fake_cert_len": 2048,
+        "tls_emulation": False,
+    }
 
 
 def test_local_migration_disables_existing_config_without_other_changes(
@@ -212,26 +360,26 @@ def test_deploy_playbook_contains_steady_state_services_without_legacy_tasks(
 
     assert result.returncode == 0, result.stderr
     for task_name in (
-        "Verify the server domain resolves to this host",
-        "Install Caddy",
-        "Install Caddy configuration",
-        "Ensure Caddy service is running",
         "Verify downloaded Telemt checksum",
         "Install Telemt binary",
-        "Configure Telemt self-steal masking",
+        "Configure Telemt external TLS masking",
         "Apply pending service restarts",
         "Ensure Telemt systemd service is running",
+        "Verify Telemt external TLS mask",
         "Verify FastAPI can reach host Telemt without changing config",
     ):
         assert task_name in result.stdout
 
     for legacy_task_name in (
+        "Install Caddy",
+        "Remove residual Meko V3 firewall rules",
+        "Remove experimental Meko V3 service files",
         "Remove legacy Telemt container",
         "Stop Telemt systemd service before config migration",
         "Disable built-in Telemt SYN limiter",
-        "Stop legacy MTProto V3 SYN fix",
-        "Remove legacy MTProto V3 firewall rules",
+        "Configure built-in Telemt SYN limiter",
         "Verify Telemt SYN limiter rules are absent",
+        "Verify built-in Telemt SYN limiter rules",
         "Verify MTProto Zapret2 runtime",
         "Verify Zapret2 NFQUEUE is available",
         "Install Zapret2 nfqws2 binary",
@@ -256,6 +404,15 @@ def test_architecture_selection_uses_non_deprecated_ansible_facts() -> None:
     assert 'ansible_facts["architecture"] in telemt_release_arches' in tasks
     assert 'telemt_release_arches[ansible_facts["architecture"]]' in tasks
     assert "ansible_architecture" not in tasks
+
+
+def test_api_whitelist_uses_non_deprecated_ansible_facts() -> None:
+    defaults = (
+        ROOT / "roles" / "mtproto_deploy" / "defaults" / "main.yml"
+    ).read_text()
+
+    assert 'ansible_facts["default_ipv4"]["address"]' in defaults
+    assert "ansible_default_ipv4" not in defaults
 
 
 def test_systemd_unit_grants_only_bind_service_capability(tmp_path: Path) -> None:
@@ -290,8 +447,9 @@ def test_systemd_unit_grants_only_bind_service_capability(tmp_path: Path) -> Non
 
     assert "User=telemt" in unit
     assert "Group=telemt" in unit
-    assert "Requires=caddy.service" in unit
-    assert "After=network-online.target caddy.service" in unit
+    assert "After=network-online.target" in unit
+    assert "caddy.service" not in unit
+    assert "zapret" not in unit.lower()
     assert (
         "ExecStart=/usr/local/bin/telemt /opt/mtproto/telemt/telemt.toml" in unit
     )
@@ -302,60 +460,30 @@ def test_systemd_unit_grants_only_bind_service_capability(tmp_path: Path) -> Non
     assert "NoNewPrivileges=true" in unit
 
 
-def test_caddy_serves_http_publicly_and_https_on_the_self_steal_port(
-    tmp_path: Path,
-) -> None:
-    caddyfile_path = tmp_path / "Caddyfile"
-    playbook = tmp_path / "render-caddyfile.yml"
-    template_path = ROOT / "roles" / "mtproto_deploy" / "templates" / "Caddyfile.j2"
-    playbook.write_text(
-        f"""
----
-- name: Render Caddyfile
-  hosts: localhost
-  gather_facts: false
-  vars:
-    mtproto_domain: fast.mtprotokeys.com
-    caddy_self_steal_port: 8443
-  tasks:
-    - name: Render production Caddyfile
-      ansible.builtin.template:
-        src: {json.dumps(str(template_path))}
-        dest: {json.dumps(str(caddyfile_path))}
-        mode: "0644"
-""".lstrip()
-    )
-
-    result = _run_local_playbook(playbook, tmp_path)
-
-    assert result.returncode == 0, result.stderr + result.stdout
-    caddyfile = caddyfile_path.read_text()
-    assert "https_port 8443" in caddyfile
-    assert "http://fast.mtprotokeys.com" in caddyfile
-    assert "fast.mtprotokeys.com {" in caddyfile
-    assert "bind 0.0.0.0" in caddyfile
-    assert "bind 127.0.0.1" in caddyfile
-    assert "disable_tlsalpn_challenge" in caddyfile
-
-
-def test_self_steal_migration_preserves_unrelated_telemt_config(
+def test_steady_state_migration_preserves_unrelated_telemt_config(
     tmp_path: Path,
 ) -> None:
     config_path = tmp_path / "telemt.toml"
-    script_path = tmp_path / "configure-self-steal.py"
-    playbook = tmp_path / "render-self-steal-migration.yml"
+    script_path = tmp_path / "configure-telemt.py"
+    playbook = tmp_path / "render-telemt-migration.yml"
     template_path = (
         ROOT
         / "roles"
         / "mtproto_deploy"
         / "templates"
-        / "configure-telemt-self-steal.py.j2"
+        / "configure-telemt.py.j2"
     )
     source = """
 [server]
 port = 443
 client_mss = "2in8"
 client_mss_bulk = "1200"
+
+[server.api]
+enabled = true
+listen = "127.0.0.1:9091"
+whitelist = ["127.0.0.1/32"]
+read_only = false
 
 [censorship]
 tls_domain = "old.example"
@@ -375,14 +503,13 @@ application = "unchanged-secret"
     playbook.write_text(
         f"""
 ---
-- name: Render self-steal migration
+- name: Render Telemt migration
   hosts: localhost
   gather_facts: false
   vars:
-    mtproto_domain: fast.mtprotokeys.com
-    caddy_self_steal_port: 8443
-    telemt_client_mss: tspu
-    telemt_client_mss_bulk: "1400"
+    telemt_tls_domain: beatvault.ru
+    telemt_api_listen: 172.17.0.1:9091
+    telemt_api_whitelist: ["172.17.0.0/16"]
   tasks:
     - name: Render migration script
       ansible.builtin.template:
@@ -415,23 +542,188 @@ application = "unchanged-secret"
     assert second_run.stdout.strip() == "unchanged"
     assert config_path.read_text() == first_result
     config = tomllib.loads(first_result)
-    assert config["server"] == {
-        "port": 443,
-        "client_mss": "tspu",
-        "client_mss_bulk": "1400",
-    }
-    assert "tls_domains" not in config["censorship"]
+    assert config["server"]["port"] == 443
     assert config["censorship"] == {
-        "tls_domain": "fast.mtprotokeys.com",
+        "tls_domain": "beatvault.ru",
         "unknown_sni_action": "mask",
         "mask": True,
-        "mask_host": "127.0.0.1",
-        "mask_port": 8443,
+        "mask_port": 443,
         "fake_cert_len": 2048,
         "tls_emulation": False,
         "mask_shape_hardening": True,
     }
     assert config["access"]["users"]["application"] == "unchanged-secret"
+
+
+def test_steady_state_migration_removes_mss(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "telemt.toml"
+    script_path = tmp_path / "configure-telemt.py"
+    playbook = tmp_path / "render-telemt-migration.yml"
+    template_path = (
+        ROOT
+        / "roles"
+        / "mtproto_deploy"
+        / "templates"
+        / "configure-telemt.py.j2"
+    )
+    config_path.write_text(
+        """
+[server]
+port = 443
+client_mss = "tspu"
+client_mss_bulk = "1400"
+
+[server.api]
+enabled = true
+listen = "127.0.0.1:9091"
+whitelist = ["127.0.0.1/32"]
+read_only = false
+
+[censorship]
+tls_domain = "old.example"
+
+[access.users]
+application = "unchanged-secret"
+""".lstrip()
+    )
+    playbook.write_text(
+        f"""
+---
+- name: Render Telemt migration
+  hosts: localhost
+  gather_facts: false
+  vars:
+    telemt_tls_domain: beatvault.ru
+    telemt_api_listen: 172.17.0.1:9091
+    telemt_api_whitelist: ["172.17.0.0/16"]
+  tasks:
+    - name: Render migration script
+      ansible.builtin.template:
+        src: {json.dumps(str(template_path))}
+        dest: {json.dumps(str(script_path))}
+        mode: "0755"
+""".lstrip()
+    )
+
+    rendered = _run_local_playbook(playbook, tmp_path)
+
+    assert rendered.returncode == 0, rendered.stderr + rendered.stdout
+    first_run = subprocess.run(
+        [str(script_path), str(config_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    first_result = config_path.read_text()
+    second_run = subprocess.run(
+        [str(script_path), str(config_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert first_run.returncode == 0, first_run.stderr
+    assert first_run.stdout.strip() == "changed"
+    assert second_run.returncode == 0, second_run.stderr
+    assert second_run.stdout.strip() == "unchanged"
+    assert config_path.read_text() == first_result
+    config = tomllib.loads(first_result)
+    assert config["server"]["port"] == 443
+    assert config["access"]["users"]["application"] == "unchanged-secret"
+
+
+def test_external_mask_migration_replaces_tls_domains_without_touching_users(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "telemt.toml"
+    script_path = tmp_path / "configure-external-mask.py"
+    playbook = tmp_path / "render-external-mask-migration.yml"
+    template_path = (
+        ROOT
+        / "roles"
+        / "mtproto_deploy"
+        / "templates"
+        / "configure-telemt.py.j2"
+    )
+    config_path.write_text(
+        """
+[server]
+port = 443
+
+[server.api]
+enabled = true
+listen = "127.0.0.1:9091"
+whitelist = ["127.0.0.1/32"]
+read_only = false
+
+[censorship]
+tls_domain = "check.mtprotokeys.com"
+tls_domains = ["old.example", "beatvault.ru"]
+unknown_sni_action = "mask"
+mask = true
+mask_host = "127.0.0.1"
+mask_port = 8443
+fake_cert_len = 2048
+tls_emulation = false
+
+[access.users]
+existing = "unchanged-secret"
+""".lstrip()
+    )
+    playbook.write_text(
+        f"""
+---
+- name: Render external-mask migration
+  hosts: localhost
+  gather_facts: false
+  vars:
+    telemt_tls_domain: beatvault.ru
+    telemt_api_listen: 172.17.0.1:9091
+    telemt_api_whitelist: ["172.17.0.0/16"]
+  tasks:
+    - name: Render migration script
+      ansible.builtin.template:
+        src: {json.dumps(str(template_path))}
+        dest: {json.dumps(str(script_path))}
+        mode: "0755"
+""".lstrip()
+    )
+
+    rendered = _run_local_playbook(playbook, tmp_path)
+
+    assert rendered.returncode == 0, rendered.stderr + rendered.stdout
+    first_run = subprocess.run(
+        [str(script_path), str(config_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    first_result = config_path.read_text()
+    second_run = subprocess.run(
+        [str(script_path), str(config_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert first_run.returncode == 0, first_run.stderr
+    assert first_run.stdout.strip() == "changed"
+    assert second_run.returncode == 0, second_run.stderr
+    assert second_run.stdout.strip() == "unchanged"
+    assert config_path.read_text() == first_result
+    config = tomllib.loads(first_result)
+    assert config["censorship"] == {
+        "tls_domain": "beatvault.ru",
+        "unknown_sni_action": "mask",
+        "mask": True,
+        "mask_port": 443,
+        "fake_cert_len": 2048,
+        "tls_emulation": False,
+    }
+    assert config["server"]["port"] == 443
+    assert config["access"]["users"] == {"existing": "unchanged-secret"}
 
 
 def test_env_migration_replaces_only_telemt_api_root() -> None:

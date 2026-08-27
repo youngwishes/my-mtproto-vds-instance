@@ -1,7 +1,6 @@
 [Unit]
 Description=Telemt MTProto proxy
-Requires=caddy.service
-After=network-online.target caddy.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]

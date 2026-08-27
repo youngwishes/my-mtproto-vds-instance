@@ -16,8 +16,6 @@ prefer = 4
 
 [server]
 port = 443
-client_mss = "tspu"
-client_mss_bulk = "1400"
 
 [server.api]
 enabled = true
@@ -36,11 +34,12 @@ port = 443
 synlimit = false
 
 [censorship]
-tls_domain = "mtprotokeys.com"
+tls_domain = "beatvault.ru"
+unknown_sni_action = "mask"
 mask = true
 mask_port = 443
 fake_cert_len = 2048
-tls_emulation = true
+tls_emulation = false
 
 [general.modes]
 classic = false

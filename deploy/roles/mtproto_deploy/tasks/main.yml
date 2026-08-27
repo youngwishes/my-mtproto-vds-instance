@@ -68,12 +68,9 @@
 - name: Clone or update repository
   ansible.builtin.git:
     repo: "{{ mtproto_repo_url }}"
-    dest: "{{ mtproto_deploy_dir }}"
+    dest: "{{ mtproto_app_dir }}"
     version: "{{ mtproto_repo_branch }}"
     force: true
-
-- name: Install mandatory Caddy self-steal frontend
-  ansible.builtin.import_tasks: install_caddy.yml
 
 - name: Validate Telemt release architecture
   ansible.builtin.assert:
@@ -170,7 +167,7 @@
 
 - name: Ensure Telemt config directory is writable by Telemt
   ansible.builtin.file:
-    path: "{{ mtproto_deploy_dir }}/telemt"
+    path: "{{ telemt_config_dir }}"
     state: directory
     owner: telemt
     group: telemt
@@ -178,7 +175,7 @@
 
 - name: Create Telemt config from example on clean install
   ansible.builtin.copy:
-    src: "{{ mtproto_deploy_dir }}/telemt/telemt.example.toml"
+    src: "{{ mtproto_app_dir }}/telemt/telemt.example.toml"
     dest: "{{ telemt_config_path }}"
     remote_src: true
     force: false
@@ -194,21 +191,28 @@
     group: telemt
     mode: "0640"
 
-- name: Install Telemt self-steal migration script
+- name: Validate Telemt TLS domain
+  ansible.builtin.assert:
+    that:
+      - telemt_tls_domain is string
+      - telemt_tls_domain is match('^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$')
+    fail_msg: telemt_tls_domain must be a valid domain name
+
+- name: Install Telemt configuration script
   ansible.builtin.template:
-    src: configure-telemt-self-steal.py.j2
-    dest: "{{ telemt_self_steal_script_path }}"
+    src: configure-telemt.py.j2
+    dest: "{{ telemt_configure_script_path }}"
     owner: root
     group: root
     mode: "0755"
 
-- name: Configure Telemt self-steal masking
+- name: Configure Telemt external TLS masking
   ansible.builtin.command:
     argv:
-      - "{{ telemt_self_steal_script_path }}"
+      - "{{ telemt_configure_script_path }}"
       - "{{ telemt_config_path }}"
-  register: telemt_self_steal_migration
-  changed_when: telemt_self_steal_migration.stdout | trim == "changed"
+  register: telemt_configuration
+  changed_when: telemt_configuration.stdout | trim == "changed"
   notify: Restart Telemt
 
 - name: Install Telemt systemd unit
@@ -222,14 +226,14 @@
 
 - name: Create .env from example (skip if already exists)
   ansible.builtin.copy:
-    src: "{{ mtproto_deploy_dir }}/.env.example"
-    dest: "{{ mtproto_deploy_dir }}/.env"
+    src: "{{ mtproto_app_dir }}/.env.example"
+    dest: "{{ mtproto_app_dir }}/.env"
     remote_src: true
     force: false
 
 - name: Route FastAPI to Telemt on the Docker host
   ansible.builtin.lineinfile:
-    path: "{{ mtproto_deploy_dir }}/.env"
+    path: "{{ mtproto_app_dir }}/.env"
     regexp: '^TELEMT_API_ROOT='
     line: "TELEMT_API_ROOT={{ telemt_api_root }}"
     create: false
@@ -255,7 +259,7 @@
   delay: 5
   until: telemt_liveness.rc == 0
 
-- name: Verify Telemt self-steal fallback through Caddy
+- name: Verify Telemt external TLS mask
   ansible.builtin.command:
     argv:
       - curl
@@ -265,17 +269,18 @@
       - --noproxy
       - "*"
       - --resolve
-      - "{{ mtproto_domain }}:443:127.0.0.1"
-      - "https://{{ mtproto_domain }}/"
-  register: telemt_self_steal_probe
+      - "{{ telemt_tls_domain }}:443:127.0.0.1"
+      - "https://{{ telemt_tls_domain }}/"
+  register: telemt_external_mask_probe
   changed_when: false
   retries: 6
   delay: 2
-  until: telemt_self_steal_probe.rc == 0
+  until: telemt_external_mask_probe.rc == 0
 
 - name: Probe a missing user directly through Telemt
   ansible.builtin.uri:
-    url: http://127.0.0.1:9091/v1/users/__ansible_connectivity_probe__
+    url: >-
+      http://{{ telemt_api_listen }}/v1/users/__ansible_connectivity_probe__
     method: GET
     status_code: 404
     return_content: true
@@ -284,7 +289,7 @@
 - name: Start FastAPI container
   ansible.builtin.command:
     cmd: docker compose up -d --build --remove-orphans api
-    chdir: "{{ mtproto_deploy_dir }}"
+    chdir: "{{ mtproto_app_dir }}"
 
 - name: Verify FastAPI can reach host Telemt without changing config
   ansible.builtin.uri:

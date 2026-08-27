@@ -9,8 +9,8 @@ ansible-playbook -i deploy/inventory.ini deploy/playbook.yml
 
 Playbook обрабатывает серверы по одному и останавливается при первой ошибке. На
 каждом сервере он отключает парольную SSH-аутентификацию, устанавливает
-зависимости, обновляет `/opt/mtproto` из ветки `main`, устанавливает Caddy и
-Telemt как systemd-сервисы и запускает FastAPI через Docker Compose.
+зависимости, обновляет `/opt/mtproto-app` из ветки `main`, устанавливает Telemt
+как systemd-сервис и запускает FastAPI через Docker Compose.
 
 Для точечного повторного деплоя можно ограничить запуск одним сервером:
 
@@ -24,10 +24,8 @@ ansible-playbook -i deploy/inventory.ini deploy/playbook.yml --limit vds4
 актуальные IP-адреса и путь к SSH-ключу. Настоящий inventory исключён из Git.
 
 Все серверы находятся в одной группе `mtproto_servers`; дополнительных
-окружений и групп нет. Собственные домены серверов задаются переменной
-`mtproto_domain` в `deploy/host_vars/vdsN.yml`. Перед изменением хоста убедитесь,
-что A-запись домена совпадает с `ansible_host`: playbook проверяет это до
-установки Caddy.
+окружений, групп, индивидуальных доменов и MSS-профилей нет. Все хосты используют
+единый TLS-домен `beatvault.ru` из defaults роли.
 
 Проверить соединение:
 
@@ -51,13 +49,10 @@ git diff --check
 Роль деплоя получает код из удалённой ветки `main`. Поэтому локальные изменения
 нужно закоммитить и отправить в remote до запуска playbook.
 
-## Caddy и Telemt
+## Telemt
 
-Роль устанавливает Caddy из официального stable-репозитория и управляет его
-конфигурацией. Caddy принимает HTTP на публичном порту `80` для ACME challenge,
-а HTTPS слушает только на `127.0.0.1:8443`. Telemt безусловно зависит от
-`caddy.service` через systemd и продолжает единолично занимать публичный порт
-`443`.
+Telemt единолично занимает публичный порт `443` и маскирует TLS через внешний
+домен `beatvault.ru`. Caddy и self-steal в steady-state схеме не используются.
 
 Роль скачивает официальный архив
 `telemt-<arch>-linux-musl.tar.gz` версии `3.4.25` вместе с `.sha256`, проверяет
@@ -72,31 +67,25 @@ Telemt работает от системного пользователя `tele
 
 Существующий `/opt/mtproto/telemt/telemt.toml` при деплое не перезаписывается.
 При чистой установке он создаётся из example-конфига, где `synlimit = false`,
-`client_mss = "tspu"` и `client_mss_bulk = "1400"`. Владелец и права
+а необязательные `client_mss` и `client_mss_bulk` отсутствуют. Владелец и права
 поддерживаются как `telemt:telemt` и `0640`, чтобы HTTP API мог атомарно
 обновлять пользователей.
 
-Миграция точечно поддерживает MSS начального рукопожатия в секции `[server]` и
-переводит секцию `[censorship]` на self-steal, сохраняя пользователей и
-остальные параметры:
+Миграция сохраняет пользователей и остальные независимые параметры, удаляет
+экспериментальные `client_mss`, `client_mss_bulk` и `tls_domains`, а секцию
+`[censorship]` приводит к единому виду:
 
 ```toml
-client_mss = "tspu"
-client_mss_bulk = "1400"
-```
-
-После FakeTLS-рукопожатия Telemt возвращает MSS к `1400`, чтобы не сохранять
-повышенное количество мелких TCP-сегментов при передаче медиа.
-
-Self-steal параметры:
-
-```toml
-tls_domain = "<собственный домен сервера>"
+tls_domain = "beatvault.ru"
 unknown_sni_action = "mask"
-mask_host = "127.0.0.1"
-mask_port = 8443
+mask = true
+mask_port = 443
 tls_emulation = false
 ```
+
+`mask_host` не задаётся: Telemt автоматически использует `tls_domain`, поэтому
+fallback направляется на `beatvault.ru:443`. Caddy, self-steal, Zapret и Meko V3
+не входят в роль; их разовая очистка на старых серверах выполняется вручную.
 
 `.env` обновляется точечно:
 
@@ -105,18 +94,22 @@ TELEMT_API_ROOT=http://host.docker.internal:9091/v1
 ```
 
 Остальные переменные сохраняются. Production Compose запускает только FastAPI
-и добавляет `host.docker.internal:host-gateway`.
+и добавляет `host.docker.internal:host-gateway`. Git checkout приложения хранится
+в `/opt/mtproto-app`, отдельно от изменяемого конфига
+`/opt/mtproto/telemt/telemt.toml`.
+
+Миграция в `[server.api]` устанавливает `listen = "172.17.0.1:9091"` и
+whitelist из Docker-подсетей (`172.16.0.0/12`) и IPv4-адреса хоста (`/32`).
+Остальные параметры API, включая `enabled` и `read_only`, сохраняются.
 
 Проверить работающие сервисы:
 
 ```bash
 systemctl is-active telemt
-systemctl is-active caddy
 /usr/local/bin/telemt --version
 /usr/local/bin/telemt healthcheck \
   /opt/mtproto/telemt/telemt.toml --mode liveness
-curl --resolve "${MTPROTO_DOMAIN}:443:127.0.0.1" \
-  "https://${MTPROTO_DOMAIN}/"
+curl --resolve "beatvault.ru:443:127.0.0.1" https://beatvault.ru/
 docker compose ps
 ```
 

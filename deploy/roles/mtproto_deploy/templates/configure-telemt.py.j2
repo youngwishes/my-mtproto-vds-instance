@@ -9,15 +9,16 @@ import tempfile
 from pathlib import Path
 
 
-SERVER_TARGET_LINES = (
-    'client_mss = {{ telemt_client_mss | to_json }}',
-    'client_mss_bulk = {{ telemt_client_mss_bulk | to_json }}',
+SERVER_TARGET_LINES: tuple[str, ...] = ()
+SERVER_API_TARGET_LINES = (
+    'listen = {{ telemt_api_listen | to_json }}',
+    'whitelist = {{ telemt_api_whitelist | to_json }}',
 )
 CENSORSHIP_TARGET_LINES = (
-    'tls_domain = {{ mtproto_domain | to_json }}',
+    'tls_domain = {{ telemt_tls_domain | to_json }}',
     'unknown_sni_action = "mask"',
-    'mask_host = "127.0.0.1"',
-    'mask_port = {{ caddy_self_steal_port }}',
+    'mask = true',
+    'mask_port = 443',
     'tls_emulation = false',
 )
 KEY_PATTERN = re.compile(r"^\s*([A-Za-z0-9_]+)\s*=")
@@ -27,7 +28,7 @@ def configure_section(
     lines: list[str],
     section: str,
     target_lines: tuple[str, ...],
-    removed_keys: set[str] | None = None,
+    removed_keys: set[str],
 ) -> list[str]:
     try:
         section_start = next(
@@ -48,7 +49,7 @@ def configure_section(
     )
     target_keys = {
         *(line.split("=", 1)[0].strip() for line in target_lines),
-        *(removed_keys or set()),
+        *removed_keys,
     }
     retained = []
     for line in lines[section_start + 1 : section_end]:
@@ -72,12 +73,19 @@ def configure(config_path: Path) -> bool:
         updated_lines,
         "server",
         SERVER_TARGET_LINES,
+        {"client_mss", "client_mss_bulk"},
+    )
+    updated_lines = configure_section(
+        updated_lines,
+        "server.api",
+        SERVER_API_TARGET_LINES,
+        set(),
     )
     updated_lines = configure_section(
         updated_lines,
         "censorship",
         CENSORSHIP_TARGET_LINES,
-        {"tls_domains"},
+        {"tls_domains", "mask_host"},
     )
     updated = "".join(updated_lines)
     if updated == original:

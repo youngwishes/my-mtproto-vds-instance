@@ -1,26 +1,24 @@
 ---
 mtproto_repo_url: https://github.com/youngwishes/my-mtproto-vds-instance.git
-mtproto_deploy_dir: /opt/mtproto
+mtproto_app_dir: /opt/mtproto-app
 mtproto_repo_branch: main
 mtproto_swap_size_mb: 2048
 telemt_version: 3.4.25
 telemt_release_base_url: https://github.com/telemt/telemt/releases/download
 telemt_binary_path: /usr/local/bin/telemt
-telemt_config_path: "{{ mtproto_deploy_dir }}/telemt/telemt.toml"
+telemt_config_dir: /opt/mtproto/telemt
+telemt_config_path: "{{ telemt_config_dir }}/telemt.toml"
 telemt_work_dir: /opt/telemt
 telemt_download_dir: "/var/cache/telemt/{{ telemt_version }}"
 telemt_service_name: telemt
 telemt_api_root: http://host.docker.internal:9091/v1
+telemt_api_listen: 172.17.0.1:9091
+telemt_api_whitelist:
+  - 172.16.0.0/12
+  - '{{ ansible_facts["default_ipv4"]["address"] }}/32'
 telemt_release_arches:
   x86_64: x86_64
   aarch64: aarch64
 telemt_archive_name: "telemt-{{ telemt_release_arch }}-linux-musl.tar.gz"
-telemt_self_steal_script_path: /usr/local/sbin/configure-telemt-self-steal.py
-telemt_client_mss: tspu
-telemt_client_mss_bulk: "1400"
-caddy_self_steal_port: 8443
-caddy_apt_key_url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
-caddy_apt_key_source_path: /usr/share/keyrings/caddy-stable-archive-keyring.asc
-caddy_apt_key_path: /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-caddy_apt_repository_url: https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt
-caddy_apt_repository_path: /etc/apt/sources.list.d/caddy-stable.list
+telemt_configure_script_path: /usr/local/sbin/configure-telemt.py
+telemt_tls_domain: beatvault.ru

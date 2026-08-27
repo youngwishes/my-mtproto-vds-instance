@@ -16,8 +16,8 @@ docker compose -f docker-compose.local.yaml up --build
 ```
 
 В production FastAPI работает в Docker, а Telemt `3.4.25` устанавливается
-Ansible как бинарный systemd-сервис на хосте. Обязательный Caddy предоставляет
-локальный HTTPS endpoint для self-steal-маскировки Telemt.
+Ansible как бинарный systemd-сервис на хосте. Telemt самостоятельно занимает
+порт `443` и использует внешний TLS-mask `beatvault.ru`.
 
 ## API
 
