@@ -23,7 +23,13 @@ Ansible как бинарный systemd-сервис на хосте. Telemt с�
 `172.16.0.0/12`, healthcheck whitelist — host default IPv4 `/32`.
 Публичный порт `9091` не должен давать HTTP-ответ. Checkout приложения хранится
 в `/opt/mtproto-app`, изменяемый конфиг — в `/opt/mtproto/telemt/telemt.toml`;
-канонический swap — `/swapfile` размером 2048 MiB, umask файлов Telemt — `0027`.
+snapshot Telemt — в `/opt/telemt/beobachten.txt`; канонический swap —
+`/swapfile` размером 2048 MiB, umask файлов Telemt — `0027`.
+
+Production-playbook описывает только штатное состояние. На чистом сервере он
+создаёт example-конфиг с фиксированным пользователем `application`. На
+существующем сервере playbook сохраняет `[access.users]` и меняет только
+управляемые параметры Telemt. Очистка старых файлов в роль не входит.
 
 ## API
 

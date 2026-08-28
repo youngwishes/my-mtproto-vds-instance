@@ -8,155 +8,60 @@
     path: "{{ mtproto_swap_path }}"
   register: mtproto_swapfile
 
-- name: Read canonical swap size
+- name: Read active swaps before changes
+  ansible.builtin.command: swapon --show=NAME --noheadings
+  register: mtproto_active_swaps_before
+  changed_when: false
+
+- name: Require no unexpected active swap before changes
+  ansible.builtin.assert:
+    that:
+      - >-
+        mtproto_active_swaps_before.stdout_lines | map('trim') |
+        reject('equalto', '') | difference([mtproto_swap_path]) | length == 0
+      - >-
+        mtproto_swapfile.stat.exists or
+        mtproto_active_swaps_before.stdout_lines | map('trim') |
+        reject('equalto', '') | list | length == 0
+    fail_msg: >-
+      Unexpected active swap found. Remove it manually before rerunning the
+      playbook; {{ mtproto_swap_path }} is the only supported swap.
+
+- name: Read existing canonical swap size
   ansible.builtin.command:
     argv: [stat, -c, "%s", "{{ mtproto_swap_path }}"]
   register: mtproto_swap_size
   changed_when: false
   when: mtproto_swapfile.stat.exists
 
-- name: Record whether canonical swap needs replacement
-  ansible.builtin.set_fact:
-    mtproto_swap_needs_replacement: >-
-      {{ mtproto_swapfile.stat.exists and
-         mtproto_swap_size.stdout | int != mtproto_swap_target_bytes | int }}
-
-- name: Read active swap devices before replacement
-  ansible.builtin.command: swapon --show=NAME --noheadings
-  register: mtproto_active_swaps_before
-  changed_when: false
-
-- name: Inspect inactive canonical swap signature
+- name: Read existing canonical swap signature
   ansible.builtin.command:
     argv: [blkid, -p, -s, TYPE, -o, value, "{{ mtproto_swap_path }}"]
   register: mtproto_swap_signature
   changed_when: false
-  failed_when: mtproto_swap_signature.rc not in [0, 2]
-  when:
-    - mtproto_swapfile.stat.exists
-    - not mtproto_swap_needs_replacement
-    - mtproto_swap_path not in
-      (mtproto_active_swaps_before.stdout_lines | map('trim') | list)
+  failed_when: false
+  when: mtproto_swapfile.stat.exists
 
-- name: Record whether canonical swap has a valid signature
-  ansible.builtin.set_fact:
-    mtproto_swap_has_valid_signature: >-
-      {{ mtproto_swapfile.stat.exists and
-         not mtproto_swap_needs_replacement and
-         (mtproto_swap_path in
-          (mtproto_active_swaps_before.stdout_lines | map('trim') | list) or
-          (mtproto_swap_signature.rc | default(2) == 0 and
-           mtproto_swap_signature.stdout | default('') | trim == 'swap')) }}
-
-- name: Record whether temporary replacement swap is active
-  ansible.builtin.set_fact:
-    mtproto_temporary_swap_active: >-
-      {{ mtproto_temporary_swap_path in
-         (mtproto_active_swaps_before.stdout_lines | map('trim') | list) }}
-
-- name: Set required disk space for swap replacement
-  ansible.builtin.set_fact:
-    mtproto_swap_required_free_bytes: >-
-      {{ ([mtproto_swap_target_bytes | int - mtproto_swap_size.stdout | int, 0]
-          | max)
-         if mtproto_temporary_swap_active
-         else mtproto_swap_target_bytes | int * 2 }}
-  when: mtproto_swap_needs_replacement
-
-- name: Check disk space for swap replacement
-  ansible.builtin.command: df --output=avail -B1 /
-  register: mtproto_swap_disk_space
-  changed_when: false
-  when: mtproto_swap_needs_replacement
-
-- name: Require disk space for swap replacement
+- name: Validate existing canonical swap
   ansible.builtin.assert:
     that:
-      - mtproto_swap_disk_space.stdout_lines[-1] | int >=
-        mtproto_swap_required_free_bytes | int
+      - mtproto_swap_size.stdout | int == mtproto_swap_target_bytes | int
+      - mtproto_swap_signature.rc == 0
+      - mtproto_swap_signature.stdout | trim == 'swap'
     fail_msg: >-
-      Replacing {{ mtproto_swap_path }} requires at least
-      {{ mtproto_swap_required_free_bytes | int }} free bytes on /.
-  when: mtproto_swap_needs_replacement
-
-- name: Remove inactive stale temporary replacement swap
-  ansible.builtin.file:
-    path: "{{ mtproto_temporary_swap_path }}"
-    state: absent
-  when:
-    - mtproto_swap_needs_replacement
-    - not mtproto_temporary_swap_active
-
-- name: Allocate temporary replacement swap
-  ansible.builtin.command:
-    argv:
-      - fallocate
-      - -l
-      - "{{ mtproto_swap_size_mb }}M"
-      - "{{ mtproto_temporary_swap_path }}"
-  when:
-    - mtproto_swap_needs_replacement
-    - not mtproto_temporary_swap_active
-
-- name: Protect temporary replacement swap
-  ansible.builtin.file:
-    path: "{{ mtproto_temporary_swap_path }}"
-    owner: root
-    group: root
-    mode: "0600"
-  when:
-    - mtproto_swap_needs_replacement
-    - not mtproto_temporary_swap_active
-
-- name: Format temporary replacement swap
-  ansible.builtin.command:
-    argv: [mkswap, "{{ mtproto_temporary_swap_path }}"]
-  when:
-    - mtproto_swap_needs_replacement
-    - not mtproto_temporary_swap_active
-
-- name: Activate temporary replacement swap
-  ansible.builtin.command:
-    argv: [swapon, "{{ mtproto_temporary_swap_path }}"]
-  when:
-    - mtproto_swap_needs_replacement
-    - not mtproto_temporary_swap_active
-
-- name: Disable incorrectly sized canonical swap
-  ansible.builtin.command:
-    argv: [swapoff, "{{ mtproto_swap_path }}"]
-  when:
-    - mtproto_swap_needs_replacement
-    - mtproto_swap_path in
-      (mtproto_active_swaps_before.stdout_lines | map('trim') | list)
-
-- name: Remove incorrectly sized canonical swap
-  ansible.builtin.file:
-    path: "{{ mtproto_swap_path }}"
-    state: absent
-  when: mtproto_swap_needs_replacement
-
-- name: Replace incorrectly sized canonical swap
-  ansible.builtin.command:
-    argv:
-      - fallocate
-      - -l
-      - "{{ mtproto_swap_size_mb }}M"
-      - "{{ mtproto_swap_path }}"
-  when: mtproto_swap_needs_replacement
+      Existing {{ mtproto_swap_path }} must be exactly
+      {{ mtproto_swap_size_mb }} MiB and have a valid swap signature.
+  when: mtproto_swapfile.stat.exists
 
 - name: Create missing canonical swap
   ansible.builtin.command:
-    argv:
-      - fallocate
-      - -l
-      - "{{ mtproto_swap_size_mb }}M"
-      - "{{ mtproto_swap_path }}"
+    argv: [fallocate, -l, "{{ mtproto_swap_size_mb }}M", "{{ mtproto_swap_path }}"]
   when: not mtproto_swapfile.stat.exists
 
 - name: Protect canonical swap
   ansible.builtin.file:
     path: "{{ mtproto_swap_path }}"
+    state: file
     owner: root
     group: root
     mode: "0600"
@@ -164,53 +69,33 @@
 - name: Format new canonical swap
   ansible.builtin.command:
     argv: [mkswap, "{{ mtproto_swap_path }}"]
-  when: not mtproto_swap_has_valid_signature
-
-- name: Read active swap devices before canonical activation
-  ansible.builtin.command: swapon --show=NAME --noheadings
-  register: mtproto_active_swaps_for_activation
-  changed_when: false
+  when: not mtproto_swapfile.stat.exists
 
 - name: Activate canonical swap
   ansible.builtin.command:
     argv: [swapon, "{{ mtproto_swap_path }}"]
   when: >-
     mtproto_swap_path not in
-    (mtproto_active_swaps_for_activation.stdout_lines | map('trim') | list)
-
-- name: Disable temporary replacement swap
-  ansible.builtin.command:
-    argv: [swapoff, "{{ mtproto_temporary_swap_path }}"]
-  when: >-
-    mtproto_temporary_swap_path in
-    (mtproto_active_swaps_for_activation.stdout_lines | map('trim') | list)
-
-- name: Remove temporary replacement swap
-  ansible.builtin.file:
-    path: "{{ mtproto_temporary_swap_path }}"
-    state: absent
-
-- name: Read active swap devices before legacy cleanup
-  ansible.builtin.command: swapon --show=NAME --noheadings
-  register: mtproto_active_swaps_for_cleanup
-  changed_when: false
-
-- name: Disable legacy extra swap
-  ansible.builtin.command:
-    argv: [swapoff, "{{ item }}"]
-  loop: "{{ mtproto_legacy_swap_paths }}"
-  when: >-
-    item in
-    (mtproto_active_swaps_for_cleanup.stdout_lines | map('trim') | list)
-
-- name: Remove legacy extra swap
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop: "{{ mtproto_legacy_swap_paths }}"
+    (mtproto_active_swaps_before.stdout_lines | map('trim') | list)
 
 - name: Persist canonical swap in fstab
-  ansible.builtin.script:
-    cmd: normalize-swap-fstab.py /etc/fstab
-  register: mtproto_swap_fstab_normalization
-  changed_when: mtproto_swap_fstab_normalization.stdout | trim == "changed"
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '^{{ mtproto_swap_path | regex_escape }}\s'
+    line: "{{ mtproto_swap_path }} none swap sw 0 0"
+    state: present
+
+- name: Read active swaps after activation
+  ansible.builtin.command: swapon --show=NAME --noheadings
+  register: mtproto_active_swaps_after
+  changed_when: false
+
+- name: Require canonical swap to be the only active swap
+  ansible.builtin.assert:
+    that:
+      - >-
+        mtproto_active_swaps_after.stdout_lines | map('trim') | reject('equalto', '') | list
+        == [mtproto_swap_path]
+    fail_msg: >-
+      {{ mtproto_swap_path }} must be the only active swap. Remove unexpected
+      swap devices manually before rerunning the playbook.

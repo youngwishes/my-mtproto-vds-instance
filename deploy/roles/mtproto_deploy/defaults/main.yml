@@ -4,15 +4,13 @@ mtproto_app_dir: /opt/mtproto-app
 mtproto_repo_branch: main
 mtproto_swap_size_mb: 2048
 mtproto_swap_path: /swapfile
-mtproto_temporary_swap_path: /swapfile.ansible-replacement
-mtproto_legacy_swap_paths:
-  - /2G_swapfile
 telemt_version: 3.4.25
 telemt_release_base_url: https://github.com/telemt/telemt/releases/download
 telemt_binary_path: /usr/local/bin/telemt
 telemt_config_dir: /opt/mtproto/telemt
 telemt_config_path: "{{ telemt_config_dir }}/telemt.toml"
 telemt_work_dir: /opt/telemt
+telemt_beobachten_path: /opt/telemt/beobachten.txt
 telemt_download_dir: "/var/cache/telemt/{{ telemt_version }}"
 telemt_service_name: telemt
 telemt_api_root: http://host.docker.internal:9091/v1

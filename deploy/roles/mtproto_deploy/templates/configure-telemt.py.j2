@@ -9,7 +9,10 @@ import tempfile
 from pathlib import Path
 
 
-SERVER_TARGET_LINES: tuple[str, ...] = ()
+GENERAL_TARGET_LINES = (
+    'beobachten_file = {{ telemt_beobachten_path | to_json }}',
+)
+GENERAL_LINKS_TARGET_LINES = ('show = "*"',)
 SERVER_API_TARGET_LINES = (
     'listen = {{ telemt_api_listen | to_json }}',
     'whitelist = {{ telemt_api_whitelist | to_json }}',
@@ -28,7 +31,6 @@ def configure_section(
     lines: list[str],
     section: str,
     target_lines: tuple[str, ...],
-    removed_keys: set[str],
 ) -> list[str]:
     try:
         section_start = next(
@@ -36,8 +38,11 @@ def configure_section(
             for index, line in enumerate(lines)
             if line.strip() == f"[{section}]"
         )
-    except StopIteration as error:
-        raise SystemExit(f"missing [{section}] section") from error
+    except StopIteration:
+        separator = [] if not lines or lines[-1].endswith("\n") else ["\n"]
+        return lines + separator + [f"\n[{section}]\n"] + [
+            f"{line}\n" for line in target_lines
+        ]
 
     section_end = next(
         (
@@ -47,10 +52,7 @@ def configure_section(
         ),
         len(lines),
     )
-    target_keys = {
-        *(line.split("=", 1)[0].strip() for line in target_lines),
-        *removed_keys,
-    }
+    target_keys = {line.split("=", 1)[0].strip() for line in target_lines}
     retained = []
     for line in lines[section_start + 1 : section_end]:
         match = KEY_PATTERN.match(line)
@@ -66,30 +68,28 @@ def configure_section(
     )
 
 
-def configure(config_path: Path) -> bool:
+def configure(config_path: Path, *, check: bool = False) -> bool:
     original = config_path.read_text()
     updated_lines = original.splitlines(keepends=True)
+    updated_lines = configure_section(updated_lines, "general", GENERAL_TARGET_LINES)
     updated_lines = configure_section(
-        updated_lines,
-        "server",
-        SERVER_TARGET_LINES,
-        {"client_mss", "client_mss_bulk"},
+        updated_lines, "general.links", GENERAL_LINKS_TARGET_LINES
     )
     updated_lines = configure_section(
         updated_lines,
         "server.api",
         SERVER_API_TARGET_LINES,
-        set(),
     )
     updated_lines = configure_section(
         updated_lines,
         "censorship",
         CENSORSHIP_TARGET_LINES,
-        {"tls_domains", "mask_host"},
     )
     updated = "".join(updated_lines)
     if updated == original:
         return False
+    if check:
+        return True
 
     metadata = config_path.stat()
     descriptor, temporary_name = tempfile.mkstemp(
@@ -111,6 +111,12 @@ def configure(config_path: Path) -> bool:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        raise SystemExit(f"usage: {sys.argv[0]} CONFIG_PATH")
-    print("changed" if configure(Path(sys.argv[1])) else "unchanged")
+    check_only = len(sys.argv) == 3 and sys.argv[1] == "--check"
+    if len(sys.argv) != 2 and not check_only:
+        raise SystemExit(f"usage: {sys.argv[0]} [--check] CONFIG_PATH")
+    config_name = sys.argv[2] if check_only else sys.argv[1]
+    print(
+        "changed"
+        if configure(Path(config_name), check=check_only)
+        else "unchanged"
+    )

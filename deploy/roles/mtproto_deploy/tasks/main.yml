@@ -171,15 +171,6 @@
     group: root
     mode: "0755"
 
-- name: Configure Telemt external TLS masking
-  ansible.builtin.command:
-    argv:
-      - "{{ telemt_configure_script_path }}"
-      - "{{ telemt_config_path }}"
-  register: telemt_configuration
-  changed_when: telemt_configuration.stdout | trim == "changed"
-  notify: Restart Telemt
-
 - name: Install Telemt systemd unit
   ansible.builtin.template:
     src: telemt.service.j2
@@ -188,6 +179,39 @@
     group: root
     mode: "0644"
   notify: Restart Telemt
+
+- name: Check whether Telemt configuration is current
+  ansible.builtin.command:
+    argv:
+      - "{{ telemt_configure_script_path }}"
+      - --check
+      - "{{ telemt_config_path }}"
+  register: telemt_configuration_check
+  changed_when: false
+
+- name: Apply pending Telemt configuration
+  when: telemt_configuration_check.stdout | trim == "changed"
+  block:
+    - name: Stop Telemt before configuration
+      ansible.builtin.systemd_service:
+        name: "{{ telemt_service_name }}"
+        state: stopped
+        daemon_reload: true
+
+    - name: Configure Telemt while stopped
+      ansible.builtin.command:
+        argv:
+          - "{{ telemt_configure_script_path }}"
+          - "{{ telemt_config_path }}"
+      register: telemt_configuration
+      changed_when: telemt_configuration.stdout | trim == "changed"
+  always:
+    - name: Start Telemt after configuration
+      ansible.builtin.systemd_service:
+        name: "{{ telemt_service_name }}"
+        state: started
+        enabled: true
+        daemon_reload: true
 
 - name: Create .env from example (skip if already exists)
   ansible.builtin.copy:
@@ -203,64 +227,8 @@
     line: "TELEMT_API_ROOT={{ telemt_api_root }}"
     create: false
 
-- name: Detect configured Telemt beobachten path
-  ansible.builtin.command:
-    argv:
-      - grep
-      - -F
-      - -x
-      - -q
-      - 'beobachten_file = "/etc/telemt/beobachten.txt"'
-      - "{{ telemt_config_path }}"
-  register: telemt_beobachten_configuration
-  changed_when: false
-  failed_when: telemt_beobachten_configuration.rc not in [0, 1]
-
-- name: Ensure configured Telemt beobachten directory exists
-  ansible.builtin.file:
-    path: /etc/telemt
-    state: directory
-    owner: telemt
-    group: telemt
-    mode: "0750"
-  when: telemt_beobachten_configuration.rc == 0
-
-- name: Inspect configured Telemt beobachten snapshot
-  ansible.builtin.stat:
-    path: /etc/telemt/beobachten.txt
-  register: telemt_configured_beobachten
-  when: telemt_beobachten_configuration.rc == 0
-
-- name: Repair configured Telemt beobachten snapshot ownership
-  ansible.builtin.file:
-    path: /etc/telemt/beobachten.txt
-    state: file
-    owner: telemt
-    group: telemt
-    mode: "0640"
-  when:
-    - telemt_beobachten_configuration.rc == 0
-    - telemt_configured_beobachten.stat.exists
-
 - name: Apply pending service restarts
   ansible.builtin.meta: flush_handlers
-
-- name: Inspect configured Telemt beobachten snapshot after service restart
-  ansible.builtin.stat:
-    path: /etc/telemt/beobachten.txt
-  register: telemt_configured_beobachten_after_restart
-  when: telemt_beobachten_configuration.rc == 0
-
-- name: Repair configured Telemt beobachten snapshot after service restart
-  ansible.builtin.file:
-    path: /etc/telemt/beobachten.txt
-    state: file
-    owner: telemt
-    group: telemt
-    mode: "0640"
-  when:
-    - telemt_beobachten_configuration.rc == 0
-    - telemt_configured_beobachten_after_restart.stat.exists
 
 - name: Ensure Telemt systemd service is running
   ansible.builtin.systemd_service:
@@ -279,6 +247,24 @@
   retries: 6
   delay: 5
   until: telemt_liveness.rc == 0
+
+- name: Wait for Telemt beobachten snapshot
+  ansible.builtin.stat:
+    path: "{{ telemt_beobachten_path }}"
+  register: telemt_beobachten
+  retries: 6
+  delay: 1
+  until:
+    - telemt_beobachten.stat.exists
+    - telemt_beobachten.stat.isreg
+
+- name: Protect Telemt beobachten snapshot
+  ansible.builtin.file:
+    path: "{{ telemt_beobachten_path }}"
+    state: file
+    owner: telemt
+    group: telemt
+    mode: "0640"
 
 - name: Verify Telemt external TLS mask
   ansible.builtin.command:
@@ -310,7 +296,7 @@
 - name: Start FastAPI container
   ansible.builtin.command:
     cmd: >-
-      docker compose --project-name mtproto up -d --build --remove-orphans api
+      docker compose --project-name mtproto up -d --build api
     chdir: "{{ mtproto_app_dir }}"
 
 - name: Verify FastAPI can reach host Telemt without changing config

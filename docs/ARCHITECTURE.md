@@ -78,9 +78,15 @@ Docker Compose добавляет `host.docker.internal` через `host-gatewa
 оба сервиса в контейнерах. Контейнер Telemt использует обычный production target
 без netfilter-пакетов и без `NET_ADMIN`; встроенный SYN-limiter отключён тем же
 example-конфигом, что используется при чистой установке на сервер. Одноразовый
-setup-контейнер также точечно мигрирует уже существующий локальный
+setup-контейнер также отключает SYN-limiter в существующем локальном
 `telemt.toml`.
 
 Роль хранит checkout приложения в `/opt/mtproto-app`, а изменяемый конфиг — в
-`/opt/mtproto/telemt/telemt.toml`. Канонический swap — `/swapfile` размером
-2048 MiB. Unit Telemt задаёт umask `0027` для файлов, создаваемых Telemt.
+`/opt/mtproto/telemt/telemt.toml`. Snapshot Telemt всегда хранится в
+`/opt/telemt/beobachten.txt`. Канонический swap — `/swapfile` размером 2048 MiB.
+Unit Telemt задаёт umask `0027` для файлов, создаваемых Telemt.
+
+Ansible поддерживает только это единое штатное состояние: он устанавливает
+чистый сервер и обновляет уже приведённый к нему сервер. Удаление старых файлов,
+нестандартных swap и других исторических артефактов выполняется отдельно и не
+усложняет постоянную роль.
