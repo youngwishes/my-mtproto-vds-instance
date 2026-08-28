@@ -277,6 +277,7 @@ def _run_beobachten_scenario(
     config: str | None,
     *,
     snapshot: bytes | None = None,
+    snapshot_during_restart: bytes | None = None,
 ) -> tuple[subprocess.CompletedProcess, Path, Path, int | None]:
     tasks = _load_ansible_yaml(
         ROOT / "roles" / "mtproto_deploy" / "tasks" / "main.yml"
@@ -287,6 +288,9 @@ def _run_beobachten_scenario(
         "Ensure configured Telemt beobachten directory exists",
         "Inspect configured Telemt beobachten snapshot",
         "Repair configured Telemt beobachten snapshot ownership",
+        "Apply pending service restarts",
+        "Inspect configured Telemt beobachten snapshot after service restart",
+        "Repair configured Telemt beobachten snapshot after service restart",
     )
     assert set(task_names) <= tasks_by_name.keys()
     scenario_tasks = json.loads(
@@ -299,6 +303,20 @@ def _run_beobachten_scenario(
         state_dir.mkdir(mode=0o777)
         snapshot_path.write_bytes(snapshot)
         snapshot_path.chmod(0o666)
+
+    if snapshot_during_restart is not None:
+        restart_index = task_names.index("Apply pending service restarts")
+        scenario_tasks.insert(
+            restart_index,
+            {
+                "name": "Simulate old Telemt snapshot creation before restart",
+                "ansible.builtin.copy": {
+                    "content": snapshot_during_restart.decode(),
+                    "dest": str(snapshot_path),
+                    "mode": "0666",
+                },
+            },
+        )
 
     for task in scenario_tasks:
         for module_name in ("ansible.builtin.file", "ansible.builtin.stat"):
@@ -556,7 +574,9 @@ def test_production_compose_runs_only_api_and_routes_to_host_telemt() -> None:
     assert api["extra_hosts"] == ["host.docker.internal=host-gateway"]
 
 
-def test_fastapi_start_adopts_the_legacy_compose_project(tmp_path: Path) -> None:
+def test_fastapi_start_uses_stable_project_argv_and_app_working_directory(
+    tmp_path: Path,
+) -> None:
     result, invocation_path = _run_fastapi_start_task(tmp_path)
 
     assert result.returncode == 0, result.stderr + result.stdout
@@ -585,6 +605,9 @@ def test_configured_beobachten_tasks_render_safe_module_contract() -> None:
         "Ensure configured Telemt beobachten directory exists",
         "Inspect configured Telemt beobachten snapshot",
         "Repair configured Telemt beobachten snapshot ownership",
+        "Apply pending service restarts",
+        "Inspect configured Telemt beobachten snapshot after service restart",
+        "Repair configured Telemt beobachten snapshot after service restart",
     } <= tasks_by_name.keys()
     detect = tasks_by_name["Detect configured Telemt beobachten path"]
     directory = tasks_by_name[
@@ -593,6 +616,13 @@ def test_configured_beobachten_tasks_render_safe_module_contract() -> None:
     inspect = tasks_by_name["Inspect configured Telemt beobachten snapshot"]
     repair = tasks_by_name[
         "Repair configured Telemt beobachten snapshot ownership"
+    ]
+    restart = tasks_by_name["Apply pending service restarts"]
+    inspect_after_restart = tasks_by_name[
+        "Inspect configured Telemt beobachten snapshot after service restart"
+    ]
+    repair_after_restart = tasks_by_name[
+        "Repair configured Telemt beobachten snapshot after service restart"
     ]
 
     assert detect["ansible.builtin.command"]["argv"] == [
@@ -630,6 +660,31 @@ def test_configured_beobachten_tasks_render_safe_module_contract() -> None:
         "telemt_beobachten_configuration.rc == 0",
         "telemt_configured_beobachten.stat.exists",
     ]
+    assert restart["ansible.builtin.meta"] == "flush_handlers"
+    assert inspect_after_restart["ansible.builtin.stat"] == {
+        "path": "/etc/telemt/beobachten.txt"
+    }
+    assert inspect_after_restart["when"] == (
+        "telemt_beobachten_configuration.rc == 0"
+    )
+    assert repair_after_restart["ansible.builtin.file"] == {
+        "path": "/etc/telemt/beobachten.txt",
+        "state": "file",
+        "owner": "telemt",
+        "group": "telemt",
+        "mode": "0640",
+    }
+    assert repair_after_restart["when"] == [
+        "telemt_beobachten_configuration.rc == 0",
+        "telemt_configured_beobachten_after_restart.stat.exists",
+    ]
+
+    task_names = [task["name"] for task in tasks]
+    restart_index = task_names.index("Apply pending service restarts")
+    assert task_names[restart_index + 1 : restart_index + 3] == [
+        "Inspect configured Telemt beobachten snapshot after service restart",
+        "Repair configured Telemt beobachten snapshot after service restart",
+    ]
 
 
 def test_configured_beobachten_repairs_existing_snapshot_without_mutating_config(
@@ -653,7 +708,27 @@ def test_configured_beobachten_repairs_existing_snapshot_without_mutating_config
     assert snapshot_path.parent.stat().st_mode & 0o777 == 0o750
 
 
-def test_configured_beobachten_does_not_create_missing_snapshot(
+def test_configured_beobachten_repairs_snapshot_created_during_restart(
+    tmp_path: Path,
+) -> None:
+    config = (
+        '[general]\nbeobachten_file = "/etc/telemt/beobachten.txt"\n\n'
+        '[access.users]\nexisting = "unchanged-secret"\n'
+    )
+    result, config_path, snapshot_path, config_inode = _run_beobachten_scenario(
+        tmp_path,
+        config,
+        snapshot_during_restart=b"created by old Telemt\n",
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert config_path.read_text() == config
+    assert config_path.stat().st_ino == config_inode
+    assert snapshot_path.read_bytes() == b"created by old Telemt\n"
+    assert snapshot_path.stat().st_mode & 0o777 == 0o640
+
+
+def test_configured_beobachten_does_not_create_missing_snapshot_after_restart(
     tmp_path: Path,
 ) -> None:
     config = '[general]\nbeobachten_file = "/etc/telemt/beobachten.txt"\n'

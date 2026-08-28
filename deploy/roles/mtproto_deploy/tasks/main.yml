@@ -245,6 +245,23 @@
 - name: Apply pending service restarts
   ansible.builtin.meta: flush_handlers
 
+- name: Inspect configured Telemt beobachten snapshot after service restart
+  ansible.builtin.stat:
+    path: /etc/telemt/beobachten.txt
+  register: telemt_configured_beobachten_after_restart
+  when: telemt_beobachten_configuration.rc == 0
+
+- name: Repair configured Telemt beobachten snapshot after service restart
+  ansible.builtin.file:
+    path: /etc/telemt/beobachten.txt
+    state: file
+    owner: telemt
+    group: telemt
+    mode: "0640"
+  when:
+    - telemt_beobachten_configuration.rc == 0
+    - telemt_configured_beobachten_after_restart.stat.exists
+
 - name: Ensure Telemt systemd service is running
   ansible.builtin.systemd_service:
     name: "{{ telemt_service_name }}"
