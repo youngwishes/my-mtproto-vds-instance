@@ -12,7 +12,6 @@ telemt_release_base_url: https://github.com/telemt/telemt/releases/download
 telemt_binary_path: /usr/local/bin/telemt
 telemt_config_dir: /opt/mtproto/telemt
 telemt_config_path: "{{ telemt_config_dir }}/telemt.toml"
-telemt_beobachten_path: "{{ telemt_config_dir }}/beobachten.txt"
 telemt_work_dir: /opt/telemt
 telemt_download_dir: "/var/cache/telemt/{{ telemt_version }}"
 telemt_service_name: telemt

@@ -218,6 +218,127 @@ def _run_local_playbook(playbook: Path, tmp_path: Path) -> subprocess.CompletedP
     )
 
 
+def _run_fastapi_start_task(
+    tmp_path: Path,
+) -> tuple[subprocess.CompletedProcess, Path]:
+    tasks = _load_ansible_yaml(
+        ROOT / "roles" / "mtproto_deploy" / "tasks" / "main.yml"
+    )
+    start_task = next(
+        task for task in tasks if task["name"] == "Start FastAPI container"
+    )
+    scenario_tasks = tmp_path / "start-fastapi-task.json"
+    scenario_tasks.write_text(json.dumps([start_task]))
+
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    invocation_path = tmp_path / "docker-invocation.json"
+    fake_docker = fake_bin / "docker"
+    fake_docker.write_text(
+        f"""#!{sys.executable}
+import json
+import os
+import sys
+from pathlib import Path
+
+Path(os.environ["COMPOSE_INVOCATION"]).write_text(json.dumps({{
+    "argv": sys.argv[1:],
+    "cwd": os.getcwd(),
+}}))
+"""
+    )
+    fake_docker.chmod(0o755)
+
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    playbook = tmp_path / "run-start-fastapi.yml"
+    playbook.write_text(
+        f"""
+---
+- name: Run production FastAPI start task
+  hosts: localhost
+  gather_facts: false
+  environment:
+    PATH: {json.dumps(f"{fake_bin}:/usr/bin:/bin:/usr/sbin:/sbin")}
+    COMPOSE_INVOCATION: {json.dumps(str(invocation_path))}
+  vars:
+    mtproto_app_dir: {json.dumps(str(app_dir))}
+  tasks:
+    - name: Run production task
+      ansible.builtin.import_tasks: {json.dumps(str(scenario_tasks))}
+""".lstrip()
+    )
+
+    return _run_local_playbook(playbook, tmp_path), invocation_path
+
+
+def _run_beobachten_scenario(
+    tmp_path: Path,
+    config: str | None,
+    *,
+    snapshot: bytes | None = None,
+) -> tuple[subprocess.CompletedProcess, Path, Path, int | None]:
+    tasks = _load_ansible_yaml(
+        ROOT / "roles" / "mtproto_deploy" / "tasks" / "main.yml"
+    )
+    tasks_by_name = {task["name"]: task for task in tasks}
+    task_names = (
+        "Detect configured Telemt beobachten path",
+        "Ensure configured Telemt beobachten directory exists",
+        "Inspect configured Telemt beobachten snapshot",
+        "Repair configured Telemt beobachten snapshot ownership",
+    )
+    assert set(task_names) <= tasks_by_name.keys()
+    scenario_tasks = json.loads(
+        json.dumps([tasks_by_name[name] for name in task_names])
+    )
+
+    state_dir = tmp_path / "etc-telemt"
+    snapshot_path = state_dir / "beobachten.txt"
+    if snapshot is not None:
+        state_dir.mkdir(mode=0o777)
+        snapshot_path.write_bytes(snapshot)
+        snapshot_path.chmod(0o666)
+
+    for task in scenario_tasks:
+        for module_name in ("ansible.builtin.file", "ansible.builtin.stat"):
+            module_args = task.get(module_name)
+            if module_args is None:
+                continue
+            if module_args["path"] == "/etc/telemt":
+                module_args["path"] = str(state_dir)
+            elif module_args["path"] == "/etc/telemt/beobachten.txt":
+                module_args["path"] = str(snapshot_path)
+            if module_name == "ansible.builtin.file":
+                module_args.pop("owner", None)
+                module_args.pop("group", None)
+
+    scenario_path = tmp_path / "beobachten-tasks.json"
+    scenario_path.write_text(json.dumps(scenario_tasks))
+    config_path = tmp_path / "telemt.toml"
+    config_inode = None
+    if config is not None:
+        config_path.write_text(config)
+        config_inode = config_path.stat().st_ino
+
+    playbook = tmp_path / "run-beobachten-scenario.yml"
+    playbook.write_text(
+        f"""
+---
+- name: Run production Telemt beobachten tasks
+  hosts: localhost
+  gather_facts: false
+  vars:
+    telemt_config_path: {json.dumps(str(config_path))}
+  tasks:
+    - name: Run production tasks
+      ansible.builtin.import_tasks: {json.dumps(str(scenario_path))}
+""".lstrip()
+    )
+    result = _run_local_playbook(playbook, tmp_path)
+    return result, config_path, snapshot_path, config_inode
+
+
 def _load_ansible_yaml(path: Path) -> list[dict]:
     ansible_playbook = shutil.which("ansible-playbook")
     assert ansible_playbook is not None
@@ -435,6 +556,149 @@ def test_production_compose_runs_only_api_and_routes_to_host_telemt() -> None:
     assert api["extra_hosts"] == ["host.docker.internal=host-gateway"]
 
 
+def test_fastapi_start_adopts_the_legacy_compose_project(tmp_path: Path) -> None:
+    result, invocation_path = _run_fastapi_start_task(tmp_path)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert json.loads(invocation_path.read_text()) == {
+        "argv": [
+            "compose",
+            "--project-name",
+            "mtproto",
+            "up",
+            "-d",
+            "--build",
+            "--remove-orphans",
+            "api",
+        ],
+        "cwd": str(tmp_path / "app"),
+    }
+
+
+def test_configured_beobachten_tasks_render_safe_module_contract() -> None:
+    tasks = _load_ansible_yaml(
+        ROOT / "roles" / "mtproto_deploy" / "tasks" / "main.yml"
+    )
+    tasks_by_name = {task["name"]: task for task in tasks}
+    assert {
+        "Detect configured Telemt beobachten path",
+        "Ensure configured Telemt beobachten directory exists",
+        "Inspect configured Telemt beobachten snapshot",
+        "Repair configured Telemt beobachten snapshot ownership",
+    } <= tasks_by_name.keys()
+    detect = tasks_by_name["Detect configured Telemt beobachten path"]
+    directory = tasks_by_name[
+        "Ensure configured Telemt beobachten directory exists"
+    ]
+    inspect = tasks_by_name["Inspect configured Telemt beobachten snapshot"]
+    repair = tasks_by_name[
+        "Repair configured Telemt beobachten snapshot ownership"
+    ]
+
+    assert detect["ansible.builtin.command"]["argv"] == [
+        "grep",
+        "-F",
+        "-x",
+        "-q",
+        'beobachten_file = "/etc/telemt/beobachten.txt"',
+        "{{ telemt_config_path }}",
+    ]
+    assert detect["changed_when"] is False
+    assert detect["failed_when"] == (
+        "telemt_beobachten_configuration.rc not in [0, 1]"
+    )
+    assert directory["ansible.builtin.file"] == {
+        "path": "/etc/telemt",
+        "state": "directory",
+        "owner": "telemt",
+        "group": "telemt",
+        "mode": "0750",
+    }
+    assert directory["when"] == "telemt_beobachten_configuration.rc == 0"
+    assert inspect["ansible.builtin.stat"] == {
+        "path": "/etc/telemt/beobachten.txt"
+    }
+    assert inspect["when"] == "telemt_beobachten_configuration.rc == 0"
+    assert repair["ansible.builtin.file"] == {
+        "path": "/etc/telemt/beobachten.txt",
+        "state": "file",
+        "owner": "telemt",
+        "group": "telemt",
+        "mode": "0640",
+    }
+    assert repair["when"] == [
+        "telemt_beobachten_configuration.rc == 0",
+        "telemt_configured_beobachten.stat.exists",
+    ]
+
+
+def test_configured_beobachten_repairs_existing_snapshot_without_mutating_config(
+    tmp_path: Path,
+) -> None:
+    config = (
+        '[general]\nbeobachten_file = "/etc/telemt/beobachten.txt"\n\n'
+        '[access.users]\nexisting = "unchanged-secret"\n'
+    )
+    result, config_path, snapshot_path, config_inode = _run_beobachten_scenario(
+        tmp_path,
+        config,
+        snapshot=b"existing snapshot\n",
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert config_path.read_text() == config
+    assert config_path.stat().st_ino == config_inode
+    assert snapshot_path.read_bytes() == b"existing snapshot\n"
+    assert snapshot_path.stat().st_mode & 0o777 == 0o640
+    assert snapshot_path.parent.stat().st_mode & 0o777 == 0o750
+
+
+def test_configured_beobachten_does_not_create_missing_snapshot(
+    tmp_path: Path,
+) -> None:
+    config = '[general]\nbeobachten_file = "/etc/telemt/beobachten.txt"\n'
+    result, config_path, snapshot_path, config_inode = _run_beobachten_scenario(
+        tmp_path,
+        config,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert config_path.read_text() == config
+    assert config_path.stat().st_ino == config_inode
+    assert snapshot_path.parent.is_dir()
+    assert snapshot_path.parent.stat().st_mode & 0o777 == 0o750
+    assert not snapshot_path.exists()
+
+
+def test_unconfigured_beobachten_leaves_state_absent_and_config_unchanged(
+    tmp_path: Path,
+) -> None:
+    config = (
+        '[general]\nbeobachten_file = "/opt/telemt/beobachten.txt"\n\n'
+        '[access.users]\nexisting = "unchanged-secret"\n'
+    )
+    result, config_path, snapshot_path, config_inode = _run_beobachten_scenario(
+        tmp_path,
+        config,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert config_path.read_text() == config
+    assert config_path.stat().st_ino == config_inode
+    assert not snapshot_path.parent.exists()
+    assert not snapshot_path.exists()
+
+
+def test_beobachten_detection_fails_when_config_cannot_be_read(
+    tmp_path: Path,
+) -> None:
+    result, _, snapshot_path, _ = _run_beobachten_scenario(tmp_path, None)
+
+    assert result.returncode != 0
+    assert "Detect configured Telemt beobachten path" in result.stdout
+    assert not snapshot_path.parent.exists()
+
+
 def test_local_compose_runs_pinned_telemt_without_net_admin() -> None:
     config = _compose_config(PROJECT_ROOT / "docker-compose.local.yaml")
 
@@ -547,8 +811,10 @@ def test_deploy_playbook_contains_steady_state_services_without_legacy_tasks(
         "Verify downloaded Telemt checksum",
         "Install Telemt binary",
         "Configure Telemt external TLS masking",
-        "Inspect Telemt beobachten snapshot",
-        "Repair Telemt beobachten snapshot ownership",
+        "Detect configured Telemt beobachten path",
+        "Ensure configured Telemt beobachten directory exists",
+        "Inspect configured Telemt beobachten snapshot",
+        "Repair configured Telemt beobachten snapshot ownership",
         "Apply pending service restarts",
         "Ensure Telemt systemd service is running",
         "Verify Telemt external TLS mask",

@@ -203,19 +203,44 @@
     line: "TELEMT_API_ROOT={{ telemt_api_root }}"
     create: false
 
-- name: Inspect Telemt beobachten snapshot
-  ansible.builtin.stat:
-    path: "{{ telemt_beobachten_path }}"
-  register: telemt_beobachten
+- name: Detect configured Telemt beobachten path
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -F
+      - -x
+      - -q
+      - 'beobachten_file = "/etc/telemt/beobachten.txt"'
+      - "{{ telemt_config_path }}"
+  register: telemt_beobachten_configuration
+  changed_when: false
+  failed_when: telemt_beobachten_configuration.rc not in [0, 1]
 
-- name: Repair Telemt beobachten snapshot ownership
+- name: Ensure configured Telemt beobachten directory exists
   ansible.builtin.file:
-    path: "{{ telemt_beobachten_path }}"
+    path: /etc/telemt
+    state: directory
+    owner: telemt
+    group: telemt
+    mode: "0750"
+  when: telemt_beobachten_configuration.rc == 0
+
+- name: Inspect configured Telemt beobachten snapshot
+  ansible.builtin.stat:
+    path: /etc/telemt/beobachten.txt
+  register: telemt_configured_beobachten
+  when: telemt_beobachten_configuration.rc == 0
+
+- name: Repair configured Telemt beobachten snapshot ownership
+  ansible.builtin.file:
+    path: /etc/telemt/beobachten.txt
     state: file
     owner: telemt
     group: telemt
     mode: "0640"
-  when: telemt_beobachten.stat.exists
+  when:
+    - telemt_beobachten_configuration.rc == 0
+    - telemt_configured_beobachten.stat.exists
 
 - name: Apply pending service restarts
   ansible.builtin.meta: flush_handlers
@@ -267,7 +292,8 @@
 
 - name: Start FastAPI container
   ansible.builtin.command:
-    cmd: docker compose up -d --build --remove-orphans api
+    cmd: >-
+      docker compose --project-name mtproto up -d --build --remove-orphans api
     chdir: "{{ mtproto_app_dir }}"
 
 - name: Verify FastAPI can reach host Telemt without changing config
